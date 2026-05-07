@@ -13,6 +13,31 @@ import Users from "./pages/Users";
 import Team from "./pages/Team";
 import Settings from "./pages/Settings";
 import Reports from "./pages/Reports";
+import Certificates from "./pages/Certificates";
+import Evaluation from "./pages/Evaluation";
+
+function ModuleGlyph({ icon, active }: { icon: string; active: boolean }) {
+  const palette: Record<string, string> = {
+    dashboard: "from-cyan-300 via-blue-400 to-sky-600",
+    users: "from-emerald-300 via-teal-400 to-cyan-600",
+    courses: "from-amber-300 via-orange-400 to-rose-500",
+    assessments: "from-violet-300 via-fuchsia-400 to-indigo-600",
+    skills: "from-lime-300 via-emerald-400 to-teal-600",
+    reports: "from-rose-300 via-pink-400 to-violet-600",
+    certificates: "from-yellow-200 via-amber-300 to-orange-500",
+    evaluation: "from-red-300 via-orange-400 to-amber-500",
+    settings: "from-slate-200 via-slate-400 to-slate-700",
+    team: "from-blue-300 via-cyan-400 to-emerald-500",
+    "my-learning": "from-cyan-200 via-emerald-300 to-lime-500",
+  };
+
+  return (
+    <span className={cn("relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border", active ? "border-slate-950/10 bg-slate-950/10" : "border-white/10 bg-white/[0.03]")}>
+      <span className={cn("h-4 w-4 rotate-45 rounded-[0.3rem] bg-gradient-to-br shadow-lg", palette[icon] || palette.dashboard)} style={{ transform: "rotateX(54deg) rotateZ(45deg)", boxShadow: active ? "0 10px 20px rgba(15, 23, 42, 0.3)" : "0 10px 22px rgba(34, 211, 238, 0.16)" }} />
+      <span className="absolute bottom-1.5 h-1.5 w-4 rounded-full bg-black/20 blur-[1px]" />
+    </span>
+  );
+}
 
 function useLocalState<T>(key: string, init: T) {
   const [val, setVal] = useState<T>(() => {
@@ -23,13 +48,38 @@ function useLocalState<T>(key: string, init: T) {
 }
 
 function normalizeData(data: AppData): AppData {
+  const mergeById = <T extends { id: string }>(current: T[], seeded: T[]) => {
+    const currentIds = new Set(current.map((item) => item.id));
+    return [...current, ...seeded.filter((item) => !currentIds.has(item.id))];
+  };
+
+  const existingUserIds = new Set(data.users.map((user) => user.id));
+  const users = [
+    ...data.users.map((user) => {
+      const seedUser = seedData.users.find((item) => item.id === user.id);
+      return {
+        ...user,
+        role: user.id === "EMP-1001" && user.role === "Admin" ? "Super Admin" : user.role,
+        team: user.team || seedUser?.team || "Unassigned",
+      };
+    }),
+    ...seedData.users.filter((user) => !existingUserIds.has(user.id)),
+  ];
+  const skills = mergeById(data.skills || [], seedData.skills);
+  const targetSkills = mergeById(data.targetSkills || [], seedData.targetSkills);
+  const courses = mergeById(data.courses || [], seedData.courses);
+  const chapters = mergeById(data.chapters || [], seedData.chapters);
+  const assessments = mergeById(data.assessments || [], seedData.assessments);
+
   return {
     ...data,
-    skills: data.skills?.length ? data.skills : seedData.skills,
-    targetSkills: data.targetSkills?.length ? data.targetSkills : seedData.targetSkills,
-    courses: data.courses.map((course) => {
+    users,
+    skills,
+    targetSkills,
+    chapters,
+    courses: courses.map((course) => {
       const seedCourse = seedData.courses.find((item) => item.id === course.id);
-      const skill = data.skills?.find((item) => item.name === course.skill) || seedData.skills.find((item) => item.name === course.skill);
+      const skill = skills.find((item) => item.name === course.skill);
       return {
         ...course,
         skillIds: course.skillIds?.length ? course.skillIds : seedCourse?.skillIds || (skill ? [skill.id] : []),
@@ -43,15 +93,26 @@ function normalizeData(data: AppData): AppData {
       priority: enrollment.priority || "Medium",
       mandatory: enrollment.mandatory ?? false,
     })),
-    assessments: data.assessments.map((assessment) => {
-      const course = data.courses.find((item) => item.id === assessment.courseId) || seedData.courses.find((item) => item.id === assessment.courseId);
+    assessments: assessments.map((assessment) => {
+      const course = courses.find((item) => item.id === assessment.courseId);
+      const seedAssessment = seedData.assessments.find((item) => item.id === assessment.id);
+      const questions = seedAssessment && seedAssessment.questions.length > assessment.questions.length ? seedAssessment.questions : assessment.questions;
       return {
         ...assessment,
         difficulty: assessment.difficulty || course?.difficulty || "Beginner",
+        questionLimit: assessment.questionLimit || seedAssessment?.questionLimit || Math.min(10, questions?.length || 10),
+        questions,
         createdAt: assessment.createdAt || now(),
         updatedAt: assessment.updatedAt || assessment.createdAt || now(),
       };
     }),
+    attempts: data.attempts.map((attempt) => ({
+      ...attempt,
+      selectedQuestionIds: attempt.selectedQuestionIds || [],
+      tabSwitchWarnings: attempt.tabSwitchWarnings || 0,
+      autoSubmittedReason: attempt.autoSubmittedReason || null,
+      proctorCaptures: attempt.proctorCaptures || [],
+    })),
   };
 }
 
@@ -86,6 +147,8 @@ export default function App() {
       case "team": return <Team data={data} currentUser={currentUser} />;
       case "settings": return <Settings data={data} currentUser={currentUser} setData={setData} />;
       case "reports": return <Reports data={data} currentUser={currentUser} />;
+      case "certificates": return <Certificates data={data} currentUser={currentUser} />;
+      case "evaluation": return <Evaluation data={data} currentUser={currentUser} />;
       default: return <Dashboard data={data} currentUser={currentUser} />;
     }
   };
@@ -111,7 +174,7 @@ export default function App() {
               <Avatar name={currentUser.name} size="sm" />
               <div className="min-w-0">
                 <p className="truncate font-medium text-white text-sm">{currentUser.name}</p>
-                <p className="text-xs text-slate-400">{currentUser.role} · {currentUser.department}</p>
+                <p className="text-xs text-slate-400">{currentUser.role} - {currentUser.department}</p>
               </div>
             </div>
             <div className="mt-3 flex gap-2">
@@ -123,7 +186,7 @@ export default function App() {
           <nav className="mt-6 flex-1 space-y-1">
             {nav.map((n) => (
               <button key={n.key} onClick={() => setModule(n.key)} className={cn("flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm font-medium transition", module === n.key ? "bg-white text-slate-950 shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white")}>
-                <span className="text-base">{n.icon}</span>
+                <ModuleGlyph icon={n.icon} active={module === n.key} />
                 <span>{n.label}</span>
               </button>
             ))}
@@ -138,7 +201,7 @@ export default function App() {
         {/* Mobile header */}
         <div className="fixed top-0 left-0 right-0 z-40 lg:hidden">
           <header className="flex items-center justify-between border-b border-white/10 bg-slate-950/90 px-4 py-3 backdrop-blur-xl">
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="rounded-xl border border-white/10 p-2 text-white">☰</button>
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-white">Menu</button>
             <p className="font-display text-lg font-semibold text-white">Nalanda</p>
             <button onClick={() => setSessionId(null)} className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-300">Sign out</button>
           </header>
@@ -148,7 +211,7 @@ export default function App() {
                 <nav className="space-y-1">
                   {nav.map((n) => (
                     <button key={n.key} onClick={() => { setModule(n.key); setSidebarOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm font-medium", module === n.key ? "bg-white text-slate-950" : "text-slate-400")}>
-                      <span>{n.icon}</span><span>{n.label}</span>
+                      <ModuleGlyph icon={n.icon} active={module === n.key} /><span>{n.label}</span>
                     </button>
                   ))}
                 </nav>
@@ -173,3 +236,4 @@ export default function App() {
     </main>
   );
 }
+

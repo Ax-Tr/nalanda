@@ -2,14 +2,75 @@ import { AppData, now, uid } from "./types";
 
 const prefs = { theme: "dark" as const, language: "en" as const, emailNotifications: true, pushNotifications: true, weeklyDigest: true, courseReminders: true, fontSize: "medium" as const, reducedMotion: false, highContrast: false };
 
+const generatedCourses = [
+  { id: "CRS-QA-001", title: "QA Automation Foundations", description: "Build a practical base in automation strategy, selectors, test design, and stable UI validation.", skill: "QA Automation", skillIds: ["SKILL-QA"], targetLevel: "Intermediate" as const, prerequisites: [], category: "QA Automation", tags: ["Selenium", "Playwright", "Regression"], thumbnailColor: "#38bdf8", ownerId: "EMP-1003", approval: "Approved" as const, status: "Active" as const, version: 1, difficulty: "Intermediate" as const, estimatedHours: 6, createdAt: now(), updatedAt: now() },
+  { id: "CRS-PY-001", title: "Python Full Stack Essentials", description: "Create full stack applications with Python APIs, React interfaces, authentication, and database workflows.", skill: "Python Full Stack", skillIds: ["SKILL-PYFS"], targetLevel: "Intermediate" as const, prerequisites: [], category: "Full Stack", tags: ["Python", "FastAPI", "React"], thumbnailColor: "#34d399", ownerId: "EMP-1003", approval: "Approved" as const, status: "Active" as const, version: 1, difficulty: "Intermediate" as const, estimatedHours: 7, createdAt: now(), updatedAt: now() },
+  { id: "CRS-QAPY-001", title: "Python API Test Automation", description: "Use Python to validate APIs, contract behavior, fixtures, CI execution, and evidence-ready automation reports.", skill: "QA Automation", skillIds: ["SKILL-QA", "SKILL-PYFS"], targetLevel: "Advanced" as const, prerequisites: ["CRS-QA-001"], category: "QA Automation", tags: ["Pytest", "API", "CI"], thumbnailColor: "#f59e0b", ownerId: "EMP-1003", approval: "Approved" as const, status: "Active" as const, version: 1, difficulty: "Advanced" as const, estimatedHours: 6, createdAt: now(), updatedAt: now() },
+];
+
+const generatedChapters = [
+  { id: "CH-QA-001", courseId: "CRS-QA-001", sequence: 1, title: "Automation Strategy & Scope", description: "Define what should be automated and how to prioritize regression coverage.", contentType: "Rich Text" as const, body: "Effective QA automation starts with choosing stable, high-value workflows. Classify tests by risk, frequency, business impact, and data setup complexity before writing scripts.", durationMinutes: 35 },
+  { id: "CH-QA-002", courseId: "CRS-QA-001", sequence: 2, title: "Locator Design & Page Objects", description: "Create maintainable selectors and reusable page-level actions.", contentType: "Rich Text" as const, body: "Reliable automation depends on stable locators, clear page objects, and test code that describes user behavior instead of DOM implementation details.", durationMinutes: 40 },
+  { id: "CH-QA-003", courseId: "CRS-QA-001", sequence: 3, title: "Regression Execution & Reporting", description: "Run suites, manage failures, and produce actionable test evidence.", contentType: "Rich Text" as const, body: "A regression suite should produce fast feedback, isolate flaky failures, and publish artifacts that make release decisions easier.", durationMinutes: 40 },
+  { id: "CH-PY-001", courseId: "CRS-PY-001", sequence: 1, title: "Python Backend Foundations", description: "Structure services, routes, validation, and clean business logic.", contentType: "Rich Text" as const, body: "Python backend applications need clear route boundaries, schema validation, service layers, and predictable error handling.", durationMinutes: 45 },
+  { id: "CH-PY-002", courseId: "CRS-PY-001", sequence: 2, title: "Frontend Integration Patterns", description: "Connect React interfaces to Python APIs with state and error handling.", contentType: "Rich Text" as const, body: "A full stack feature connects UI state, API contracts, loading states, validation feedback, and secure persistence into one workflow.", durationMinutes: 45 },
+  { id: "CH-PY-003", courseId: "CRS-PY-001", sequence: 3, title: "Auth, Database & Deployment", description: "Secure the app, persist data, and prepare production deployment.", contentType: "Rich Text" as const, body: "Production full stack systems need authentication, authorization, migrations, environment configuration, and repeatable deployment checks.", durationMinutes: 50 },
+  { id: "CH-QAPY-001", courseId: "CRS-QAPY-001", sequence: 1, title: "Pytest API Foundations", description: "Write API tests with fixtures, assertions, and reusable clients.", contentType: "Rich Text" as const, body: "API automation with pytest relies on reusable clients, focused fixtures, deterministic data setup, and assertions that verify contracts.", durationMinutes: 35 },
+  { id: "CH-QAPY-002", courseId: "CRS-QAPY-001", sequence: 2, title: "Contract & Negative Testing", description: "Validate schemas, status codes, edge cases, and failure behavior.", contentType: "Rich Text" as const, body: "Strong API quality includes positive, negative, boundary, authorization, and contract tests that catch behavior drift early.", durationMinutes: 40 },
+  { id: "CH-QAPY-003", courseId: "CRS-QAPY-001", sequence: 3, title: "CI Evidence & Quality Gates", description: "Run automated checks in CI and publish audit-friendly evidence.", contentType: "Rich Text" as const, body: "CI quality gates should execute reliable tests, capture reports, fail on critical regressions, and expose evidence for release review.", durationMinutes: 40 },
+];
+
+const questionTemplates = [
+  ["What is the main goal of {topic}?", ["Create reliable delivery evidence", "Avoid all documentation", "Skip validation", "Reduce team communication"], 0],
+  ["Which practice improves {topic} most?", ["Stable design and clear ownership", "Random naming", "Manual-only checks", "Ignoring failures"], 0],
+  ["What should be reviewed before approving {topic} work?", ["Risk, coverage, and evidence", "Only color choices", "Lunch schedule", "Browser bookmarks"], 0],
+  ["Which metric best supports monitoring {topic}?", ["Completion and quality trend", "Number of meetings only", "Window size", "Keyboard brand"], 0],
+  ["What is a common failure mode in {topic}?", ["Unstable data or unclear scope", "Too much evidence", "Clear ownership", "Version control"], 0],
+  ["How should defects found during {topic} be handled?", ["Log with steps, evidence, and impact", "Hide until release", "Delete the test", "Rename the course"], 0],
+  ["Which artifact helps audit {topic}?", ["Traceable test report", "Personal notes only", "Unlabeled screenshot", "Empty checklist"], 0],
+  ["What makes {topic} maintainable?", ["Reusable patterns and readable naming", "Duplicated scripts everywhere", "Hard-coded secrets", "No review process"], 0],
+  ["When should {topic} be updated?", ["When product behavior or risk changes", "Never", "Only after an outage", "Only yearly"], 0],
+  ["Who benefits from clear {topic} outcomes?", ["Learners, managers, and auditors", "No one", "Only external vendors", "Only designers"], 0],
+] as const;
+
+function makeQuestions(prefix: string, topic: string) {
+  return [1, 2, 3].flatMap((setNo) => questionTemplates.map(([prompt, options, answer], index) => ({
+    id: `${prefix}-Q${String((setNo - 1) * questionTemplates.length + index + 1).padStart(2, "0")}`,
+    type: "MCQ" as const,
+    prompt: `${prompt.replace("{topic}", topic)} ${setNo === 1 ? "" : `(Scenario ${setNo})`}`.trim(),
+    options: [...options],
+    answer,
+    points: 10,
+  })));
+}
+
+const generatedAssessments = generatedChapters.map((chapter) => ({
+  id: `ASM-${chapter.id.replace("CH-", "")}`,
+  title: `${chapter.title} Assessment`,
+  chapterId: chapter.id,
+  courseId: chapter.courseId,
+  type: "MCQ" as const,
+  ownerId: "EMP-1003",
+  approval: "Approved" as const,
+  difficulty: generatedCourses.find((course) => course.id === chapter.courseId)?.difficulty || "Intermediate" as const,
+  durationMinutes: 20,
+  passScore: 70,
+  questionLimit: 10,
+  questions: makeQuestions(`Q-${chapter.id.replace("CH-", "")}`, chapter.title),
+  createdAt: now(),
+  updatedAt: now(),
+}));
+
 export const seedData: AppData = {
   users: [
-    { id: "EMP-1001", name: "Nisha Rao", email: "admin@nalanda.local", password: "Password@123", avatar: "NR", role: "Admin", department: "People Ops", designation: "L&D Director", managerId: null, status: "Active", joinedAt: "2024-01-15", lastActive: "Today", preferences: { ...prefs } },
-    { id: "EMP-1002", name: "Aarav Menon", email: "aarav@nalanda.local", password: "Password@123", avatar: "AM", role: "Manager", department: "Sales", designation: "Sales Lead", managerId: "EMP-1001", status: "Active", joinedAt: "2024-03-10", lastActive: "Today", preferences: { ...prefs } },
-    { id: "EMP-1003", name: "Kabir Sethi", email: "kabir@nalanda.local", password: "Password@123", avatar: "KS", role: "Manager", department: "Engineering", designation: "Tech Lead", managerId: "EMP-1001", status: "Active", joinedAt: "2024-02-20", lastActive: "Yesterday", preferences: { ...prefs } },
-    { id: "EMP-1004", name: "Diya Sharma", email: "diya@nalanda.local", password: "Password@123", avatar: "DS", role: "Employee", department: "Engineering", designation: "Software Engineer", managerId: "EMP-1003", status: "Active", joinedAt: "2024-06-01", lastActive: "Today", preferences: { ...prefs } },
-    { id: "EMP-1005", name: "Meera Iyer", email: "meera@nalanda.local", password: "Password@123", avatar: "MI", role: "Employee", department: "Sales", designation: "Account Exec", managerId: "EMP-1002", status: "Active", joinedAt: "2024-07-15", lastActive: "2 days ago", preferences: { ...prefs } },
-    { id: "EMP-1006", name: "Rohan Das", email: "rohan@nalanda.local", password: "Password@123", avatar: "RD", role: "Employee", department: "Operations", designation: "Ops Analyst", managerId: "EMP-1002", status: "Active", joinedAt: "2024-08-01", lastActive: "Today", preferences: { ...prefs } },
+    { id: "EMP-1001", name: "Nisha Rao", email: "admin@nalanda.local", password: "Password@123", avatar: "NR", role: "Super Admin", department: "People Ops", team: "Learning Strategy", designation: "L&D Director", managerId: null, status: "Active", joinedAt: "2024-01-15", lastActive: "Today", preferences: { ...prefs } },
+    { id: "EMP-1002", name: "Aarav Menon", email: "aarav@nalanda.local", password: "Password@123", avatar: "AM", role: "Manager", department: "Sales", team: "Enterprise Sales", designation: "Sales Lead", managerId: "EMP-1001", status: "Active", joinedAt: "2024-03-10", lastActive: "Today", preferences: { ...prefs } },
+    { id: "EMP-1003", name: "Kabir Sethi", email: "kabir@nalanda.local", password: "Password@123", avatar: "KS", role: "Manager", department: "Engineering", team: "Platform", designation: "Tech Lead", managerId: "EMP-1001", status: "Active", joinedAt: "2024-02-20", lastActive: "Yesterday", preferences: { ...prefs } },
+    { id: "EMP-1004", name: "Diya Sharma", email: "diya@nalanda.local", password: "Password@123", avatar: "DS", role: "Employee", department: "Engineering", team: "Platform", designation: "Software Engineer", managerId: "EMP-1003", status: "Active", joinedAt: "2024-06-01", lastActive: "Today", preferences: { ...prefs } },
+    { id: "EMP-1005", name: "Meera Iyer", email: "meera@nalanda.local", password: "Password@123", avatar: "MI", role: "Employee", department: "Sales", team: "Enterprise Sales", designation: "Account Exec", managerId: "EMP-1002", status: "Active", joinedAt: "2024-07-15", lastActive: "2 days ago", preferences: { ...prefs } },
+    { id: "EMP-1006", name: "Rohan Das", email: "rohan@nalanda.local", password: "Password@123", avatar: "RD", role: "Employee", department: "Operations", team: "Revenue Operations", designation: "Ops Analyst", managerId: "EMP-1002", status: "Active", joinedAt: "2024-08-01", lastActive: "Today", preferences: { ...prefs } },
+    { id: "EMP-1007", name: "Ananya Paul", email: "ananya@nalanda.local", password: "Password@123", avatar: "AP", role: "Employee", department: "Engineering", team: "QA Automation", designation: "QA Engineer", managerId: "EMP-1003", status: "Inactive", joinedAt: "2023-11-04", lastActive: "Apr 10", preferences: { ...prefs } },
+    { id: "EMP-1008", name: "Vikram Shah", email: "vikram@nalanda.local", password: "Password@123", avatar: "VS", role: "Admin", department: "People Ops", team: "HR Operations", designation: "HR Business Partner", managerId: "EMP-1001", status: "Active", joinedAt: "2024-04-22", lastActive: "Today", preferences: { ...prefs } },
   ],
   skills: [
     { id: "SKILL-SEC", name: "Security", category: "Technical", description: "Secure coding, OWASP controls, and threat modeling.", status: "Active", createdAt: now() },
@@ -17,6 +78,8 @@ export const seedData: AppData = {
     { id: "SKILL-ANL", name: "Analytics", category: "Functional", description: "Data interpretation, storytelling, and business review skills.", status: "Active", createdAt: now() },
     { id: "SKILL-COMM", name: "Communication", category: "Behavioral", description: "Clear stakeholder communication and presentation skills.", status: "Active", createdAt: now() },
     { id: "SKILL-COMP", name: "Compliance", category: "Compliance", description: "Policy, risk, and regulatory readiness.", status: "Active", createdAt: now() },
+    { id: "SKILL-QA", name: "QA Automation", category: "Technical", description: "Automated test strategy, UI/API automation, regression quality gates, and release evidence.", status: "Active", createdAt: now() },
+    { id: "SKILL-PYFS", name: "Python Full Stack", category: "Technical", description: "Python APIs, frontend integration, databases, authentication, and deployment-ready full stack delivery.", status: "Active", createdAt: now() },
   ],
   targetSkills: [
     { id: "TS-001", skillId: "SKILL-SEC", scope: "Department", department: "Engineering", targetLevel: "Advanced", targetScore: 85, priority: "High" },
@@ -24,11 +87,14 @@ export const seedData: AppData = {
     { id: "TS-003", skillId: "SKILL-LEAD", scope: "Role", designation: "Sales Lead", targetLevel: "Advanced", targetScore: 85, priority: "High" },
     { id: "TS-004", skillId: "SKILL-COMP", scope: "Organization", targetLevel: "Intermediate", targetScore: 70, priority: "High" },
     { id: "TS-005", skillId: "SKILL-SEC", scope: "Employee", userId: "EMP-1004", targetLevel: "Advanced", targetScore: 90, priority: "High" },
+    { id: "TS-006", skillId: "SKILL-QA", scope: "Department", department: "Team:QA Automation", targetLevel: "Advanced", targetScore: 85, priority: "High" },
+    { id: "TS-007", skillId: "SKILL-PYFS", scope: "Department", department: "Team:Platform", targetLevel: "Intermediate", targetScore: 80, priority: "High" },
   ],
   courses: [
     { id: "CRS-001", title: "Secure Coding for Cloud Teams", description: "Threat modeling, OWASP controls, and secure release patterns.", skill: "Security", skillIds: ["SKILL-SEC"], targetLevel: "Advanced", prerequisites: [], category: "Technical", tags: ["OWASP", "Cloud"], thumbnailColor: "#22d3ee", ownerId: "EMP-1003", approval: "Approved", status: "Active", version: 2, difficulty: "Advanced", estimatedHours: 6, createdAt: now(), updatedAt: now() },
     { id: "CRS-002", title: "Manager Essentials: Feedback Systems", description: "Practical rituals for coaching and performance reviews.", skill: "Leadership", skillIds: ["SKILL-LEAD", "SKILL-COMM"], targetLevel: "Intermediate", prerequisites: [], category: "Soft Skills", tags: ["Coaching", "People"], thumbnailColor: "#a78bfa", ownerId: "EMP-1002", approval: "Approved", status: "Active", version: 1, difficulty: "Intermediate", estimatedHours: 4, createdAt: now(), updatedAt: now() },
     { id: "CRS-003", title: "Data Storytelling for Business Reviews", description: "Build executive narratives with evidence and charts.", skill: "Analytics", skillIds: ["SKILL-ANL"], targetLevel: "Beginner", prerequisites: [], category: "Business", tags: ["BI", "Charts"], thumbnailColor: "#34d399", ownerId: "EMP-1003", approval: "Pending", status: "Active", version: 1, difficulty: "Beginner", estimatedHours: 3, createdAt: now(), updatedAt: now() },
+    ...generatedCourses,
   ],
   chapters: [
     { id: "CH-001", courseId: "CRS-001", sequence: 1, title: "Threat Model Primer", description: "Identify assets, actors, and trust boundaries.", contentType: "Rich Text", body: "A threat model identifies what you're protecting (assets), who might attack (threat actors), where trust changes (boundaries), and what could go wrong (threats). Document controls and validation evidence before every release.", durationMinutes: 25 },
@@ -38,6 +104,7 @@ export const seedData: AppData = {
     { id: "CH-005", courseId: "CRS-002", sequence: 2, title: "Coaching Conversations", description: "Running effective 1:1 coaching sessions.", contentType: "Rich Text", body: "Structure your coaching around GROW: Goal, Reality, Options, Will. Ask powerful questions instead of giving answers.", durationMinutes: 30 },
     { id: "CH-006", courseId: "CRS-003", sequence: 1, title: "Narrative Flow Fundamentals", description: "Start with the decision, show signal, explain risk.", contentType: "Rich Text", body: "Every data story should answer: What decision does this inform? What does the data signal? What's the risk of inaction?", durationMinutes: 20 },
     { id: "CH-007", courseId: "CRS-003", sequence: 2, title: "Chart Selection Patterns", description: "Choosing the right visualization for your data.", contentType: "PDF", body: "Guide to selecting appropriate chart types based on data relationships.", fileName: "chart-patterns.pdf", durationMinutes: 25 },
+    ...generatedChapters,
   ],
   assessments: [
     { id: "ASM-001", title: "Threat Model Assessment", chapterId: "CH-001", courseId: "CRS-001", type: "MCQ", ownerId: "EMP-1003", approval: "Approved", durationMinutes: 15, passScore: 70, questions: [
@@ -57,6 +124,7 @@ export const seedData: AppData = {
     { id: "ASM-005", title: "Coaching Assessment", chapterId: "CH-005", courseId: "CRS-002", type: "MCQ", ownerId: "EMP-1002", approval: "Pending", durationMinutes: 15, passScore: 70, questions: [
       { id: "Q-007", type: "MCQ", prompt: "What does GROW stand for?", options: ["Goal Reality Options Will", "Growth Review Outcome Work", "Guide Reflect Observe Write", "Goal Results Objectives Win"], answer: 0, points: 50 },
     ]},
+    ...generatedAssessments,
   ],
   enrollments: [
     { id: "ENR-001", courseId: "CRS-001", userId: "EMP-1004", assignedBy: "EMP-1003", dueAt: "2026-05-20", priority: "High", mandatory: true, progress: 66, completedChapters: ["CH-001", "CH-002"], timeSpentMinutes: 84, startedAt: now(), completedAt: null },

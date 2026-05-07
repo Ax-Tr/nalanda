@@ -1,6 +1,6 @@
 // Types for the Nalanda L&D Platform
-export type Role = "Admin" | "Manager" | "Employee";
-export type ModuleKey = "dashboard" | "my-learning" | "courses" | "chapters" | "assessments" | "team" | "users" | "settings" | "skills" | "reports";
+export type Role = "Super Admin" | "Admin" | "Manager" | "Employee";
+export type ModuleKey = "dashboard" | "my-learning" | "courses" | "chapters" | "assessments" | "team" | "users" | "settings" | "skills" | "reports" | "certificates" | "evaluation";
 export type Status = "Active" | "Inactive";
 export type Approval = "Approved" | "Pending" | "Rejected";
 export type AssessmentType = "MCQ" | "Descriptive" | "Mixed";
@@ -14,6 +14,7 @@ export type User = {
   avatar: string;
   role: Role;
   department: string;
+  team: string;
   designation: string;
   managerId: string | null;
   status: Status;
@@ -92,6 +93,7 @@ export type Assessment = {
   difficulty?: "Beginner" | "Intermediate" | "Advanced";
   durationMinutes: number;
   passScore: number;
+  questionLimit?: number;
   questions: Question[];
   createdAt?: string;
   updatedAt?: string;
@@ -117,8 +119,23 @@ export type Attempt = {
   maxScore: number;
   feedback: string;
   answers: Record<string, string | number>;
+  selectedQuestionIds?: string[];
+  tabSwitchWarnings?: number;
+  autoSubmittedReason?: string | null;
+  proctorCaptures?: ProctorCapture[];
   startedAt: string;
   submittedAt: string | null;
+};
+
+export type ProctorCapture = {
+  id: string;
+  assessmentId: string;
+  courseId: string;
+  chapterId: string;
+  userId: string;
+  questionId: string;
+  imageDataUrl: string;
+  capturedAt: string;
 };
 
 export type Enrollment = {
@@ -190,31 +207,46 @@ export type AppData = {
 };
 
 export const navByRole: Record<Role, { key: ModuleKey; label: string; icon: string }[]> = {
+  "Super Admin": [
+    { key: "dashboard", label: "HQ", icon: "dashboard" },
+    { key: "users", label: "People", icon: "users" },
+    { key: "courses", label: "Courses", icon: "courses" },
+    { key: "assessments", label: "Tests", icon: "assessments" },
+    { key: "skills", label: "Skills", icon: "skills" },
+    { key: "reports", label: "Reports", icon: "reports" },
+    { key: "certificates", label: "Certificates", icon: "certificates" },
+    { key: "evaluation", label: "Evaluation", icon: "evaluation" },
+    { key: "settings", label: "Profile", icon: "settings" },
+  ],
   Admin: [
-    { key: "dashboard", label: "Command Center", icon: "◆" },
-    { key: "users", label: "User Management", icon: "◈" },
-    { key: "courses", label: "Courses", icon: "◇" },
-    { key: "assessments", label: "Assessments", icon: "◎" },
-    { key: "skills", label: "Skill Master", icon: "◉" },
-    { key: "reports", label: "Analytics", icon: "▦" },
-    { key: "settings", label: "Settings", icon: "⚙" },
+    { key: "dashboard", label: "HQ", icon: "dashboard" },
+    { key: "users", label: "People", icon: "users" },
+    { key: "courses", label: "Courses", icon: "courses" },
+    { key: "assessments", label: "Tests", icon: "assessments" },
+    { key: "skills", label: "Skills", icon: "skills" },
+    { key: "reports", label: "Reports", icon: "reports" },
+    { key: "certificates", label: "Certificates", icon: "certificates" },
+    { key: "settings", label: "Profile", icon: "settings" },
   ],
   Manager: [
-    { key: "dashboard", label: "Team Dashboard", icon: "◆" },
-    { key: "my-learning", label: "My Learning", icon: "▶" },
-    { key: "courses", label: "Course Studio", icon: "◇" },
-    { key: "assessments", label: "Assessment Studio", icon: "◎" },
-    { key: "team", label: "Team Monitor", icon: "◈" },
-    { key: "settings", label: "Settings", icon: "⚙" },
+    { key: "dashboard", label: "Hub", icon: "dashboard" },
+    { key: "my-learning", label: "Learn", icon: "my-learning" },
+    { key: "courses", label: "Studio", icon: "courses" },
+    { key: "assessments", label: "Tests", icon: "assessments" },
+    { key: "team", label: "Team", icon: "team" },
+    { key: "certificates", label: "Certificates", icon: "certificates" },
+    { key: "settings", label: "Profile", icon: "settings" },
   ],
   Employee: [
-    { key: "dashboard", label: "My Learning", icon: "◆" },
-    { key: "courses", label: "My Courses", icon: "◇" },
-    { key: "skills", label: "Skill Analysis", icon: "◉" },
-    { key: "settings", label: "Settings", icon: "⚙" },
+    { key: "dashboard", label: "Learn", icon: "dashboard" },
+    { key: "courses", label: "Courses", icon: "courses" },
+    { key: "skills", label: "Skills", icon: "skills" },
+    { key: "certificates", label: "Certificates", icon: "certificates" },
+    { key: "settings", label: "Profile", icon: "settings" },
   ],
 };
-
 export const colors = ["#22d3ee", "#a78bfa", "#34d399", "#f59e0b", "#fb7185", "#818cf8", "#2dd4bf", "#f472b6"];
+export const isAdminRole = (role: Role) => role === "Super Admin" || role === "Admin";
 export const now = () => new Date().toISOString();
 export const uid = (prefix: string) => `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+

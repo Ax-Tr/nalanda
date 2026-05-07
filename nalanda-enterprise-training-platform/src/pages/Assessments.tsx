@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Panel, Modal, StatusPill, Input, Select, EmptyState, cn } from "../components";
 import type { AppData, User, Assessment, AssessmentType, Question } from "../types";
+import { isAdminRole } from "../types";
 import { now, uid } from "../types";
 
 type BulkQuestion = { prompt: string; type: "MCQ" | "Descriptive"; options: string[]; answer: number; points: number };
@@ -15,6 +16,7 @@ const emptyForm = {
   type: "MCQ" as AssessmentType,
   durationMinutes: "15",
   passScore: "70",
+  questionLimit: "10",
   prompt: "",
   optA: "",
   optB: "",
@@ -30,11 +32,27 @@ const cloneQuestion = (question: Question): Question => ({
   options: question.options ? [...question.options] : undefined,
 });
 
+const ensureQuestionBank = (questions: Question[], questionLimit: number) => {
+  const required = Math.max(questionLimit * 3, questionLimit);
+  if (questions.length >= required) return questions;
+  const source = questions.length ? questions : [{ id: uid("Q"), type: "MCQ" as const, prompt: "Placeholder question", options: ["Option A", "Option B", "Option C", "Option D"], answer: 0, points: 10 }];
+  const expanded = [...questions];
+  while (expanded.length < required) {
+    const base = source[expanded.length % source.length];
+    expanded.push({
+      ...cloneQuestion(base),
+      id: uid("Q"),
+      prompt: `${base.prompt} (Variant ${expanded.length + 1})`,
+    });
+  }
+  return expanded;
+};
+
 export default function Assessments({ data, currentUser, setData }: { data: AppData; currentUser: User; setData: (d: AppData) => void }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Assessment | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [editMeta, setEditMeta] = useState({ title: "", courseId: "", chapterId: "", durationMinutes: "15", passScore: "70", difficulty: "Beginner" as Assessment["difficulty"] });
+  const [editMeta, setEditMeta] = useState({ title: "", courseId: "", chapterId: "", durationMinutes: "15", passScore: "70", questionLimit: "10", difficulty: "Beginner" as Assessment["difficulty"] });
   const [editQuestions, setEditQuestions] = useState<Question[]>([]);
   const [bulkQuestions, setBulkQuestions] = useState<BulkQuestion[]>([]);
   const [uploadMode, setUploadMode] = useState(false);
@@ -42,11 +60,11 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
 
   const addAudit = (d: AppData, a: string, e: string): AppData => ({ ...d, audit: [{ id: uid("AUD"), actorId: currentUser.id, action: a, entity: e, at: now() }, ...d.audit] });
 
-  const ownedCourses = data.courses.filter((course) => currentUser.role === "Admin" || course.ownerId === currentUser.id);
+  const ownedCourses = data.courses.filter((course) => isAdminRole(currentUser.role) || course.ownerId === currentUser.id);
   const skillOptions = data.skills.filter((skill) => skill.status === "Active");
   const createSkillOptions = skillOptions.filter((skill) => ownedCourses.some((course) => course.skillIds?.includes(skill.id) || course.skill === skill.name));
   const visible = currentUser.role === "Employee" ? [] : data.assessments
-    .filter((assessment) => currentUser.role === "Admin" || assessment.ownerId === currentUser.id || assessment.approval === "Approved")
+    .filter((assessment) => isAdminRole(currentUser.role) || assessment.ownerId === currentUser.id || assessment.approval === "Approved")
     .filter((assessment) => {
       if (skillFilter === "All") return true;
       const course = data.courses.find((item) => item.id === assessment.courseId);
@@ -89,6 +107,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
       chapterId: assessment.chapterId,
       durationMinutes: String(assessment.durationMinutes),
       passScore: String(assessment.passScore),
+      questionLimit: String(assessment.questionLimit || 10),
       difficulty: assessment.difficulty || course?.difficulty || "Beginner",
     });
     setEditQuestions(assessment.questions.map(cloneQuestion));
@@ -110,6 +129,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
     const chapter = data.chapters.find((item) => item.id === form.chapterId);
     const course = data.courses.find((item) => item.id === chapter?.courseId);
     if (!chapter) return;
+    const questionLimit = Number(form.questionLimit) || 10;
     const payload: Assessment = {
       id: uid("ASM"),
       title: form.title,
@@ -117,11 +137,12 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
       courseId: chapter.courseId,
       type: form.type,
       ownerId: currentUser.id,
-      approval: currentUser.role === "Admin" ? "Approved" : "Pending",
+      approval: isAdminRole(currentUser.role) ? "Approved" : "Pending",
       difficulty: course?.difficulty || "Beginner",
       durationMinutes: Number(form.durationMinutes),
       passScore: Number(form.passScore),
-      questions: buildQuestions(),
+      questionLimit,
+      questions: ensureQuestionBank(buildQuestions(), questionLimit),
       createdAt: now(),
       updatedAt: now(),
     };
@@ -143,7 +164,8 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
       difficulty: editMeta.difficulty,
       durationMinutes: Number(editMeta.durationMinutes),
       passScore: Number(editMeta.passScore),
-      questions: editQuestions,
+      questionLimit: Number(editMeta.questionLimit) || 10,
+      questions: ensureQuestionBank(editQuestions, Number(editMeta.questionLimit) || 10),
       updatedAt: now(),
     };
     const assessments = data.assessments.map((item) => item.id === editing.id ? updated : item);
@@ -227,6 +249,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
               <Select label="Difficulty" value={editMeta.difficulty || "Beginner"} values={["Beginner", "Intermediate", "Advanced"]} onChange={(v) => setEditMeta({ ...editMeta, difficulty: v })} />
               <Input label="Duration (min)" value={editMeta.durationMinutes} onChange={(v) => setEditMeta({ ...editMeta, durationMinutes: v })} type="number" />
               <Input label="Pass score (%)" value={editMeta.passScore} onChange={(v) => setEditMeta({ ...editMeta, passScore: v })} type="number" />
+              <Input label="Questions shown to employee" value={editMeta.questionLimit} onChange={(v) => setEditMeta({ ...editMeta, questionLimit: v })} type="number" />
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
               <div className="flex flex-wrap gap-2">
@@ -236,6 +259,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
               </div>
               <p className="mt-4 text-sm text-slate-400">Created: {formatDate(editing.createdAt)}</p>
               <p className="mt-1 text-sm text-slate-400">Last modified: {formatDate(editing.updatedAt)}</p>
+              <p className="mt-1 text-sm text-slate-400">Required bank: {(Number(editMeta.questionLimit) || 10) * 3} questions</p>
             </div>
           </div>
         </Panel>
@@ -311,11 +335,11 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
                     <div className="rounded-xl border border-white/10 p-2"><p className="text-xs text-slate-500">Created</p><p className="font-semibold text-white">{formatDate(assessment.createdAt)}</p></div>
                     <div className="rounded-xl border border-white/10 p-2"><p className="text-xs text-slate-500">Modified</p><p className="font-semibold text-white">{formatDate(assessment.updatedAt)}</p></div>
                     <div className="rounded-xl border border-white/10 p-2"><p className="text-xs text-slate-500">Avg score</p><p className="font-semibold text-white">{avg || "-"}</p></div>
-                    <div className="rounded-xl border border-white/10 p-2"><p className="text-xs text-slate-500">Questions</p><p className="font-semibold text-white">{assessment.questions.length}</p></div>
+                    <div className="rounded-xl border border-white/10 p-2"><p className="text-xs text-slate-500">Bank / shown</p><p className="font-semibold text-white">{assessment.questions.length}/{assessment.questionLimit || 10}</p></div>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button onClick={() => openEditPage(assessment)} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-white/5">Edit</button>
-                    {currentUser.role === "Admin" && assessment.approval === "Pending" && <>
+                    {isAdminRole(currentUser.role) && assessment.approval === "Pending" && <>
                       <button onClick={() => approve(assessment.id)} className="rounded-full bg-emerald-300 px-3 py-2 text-xs font-bold text-slate-950">Approve</button>
                       <button onClick={() => reject(assessment.id)} className="rounded-full bg-rose-300 px-3 py-2 text-xs font-bold text-slate-950">Reject</button>
                     </>}
@@ -359,6 +383,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
               </label>
               <Input label="Duration (min)" value={form.durationMinutes} onChange={(v) => setForm({ ...form, durationMinutes: v })} type="number" />
               <Input label="Pass score (%)" value={form.passScore} onChange={(v) => setForm({ ...form, passScore: v })} type="number" />
+              <Input label="Questions shown to employee" value={form.questionLimit} onChange={(v) => setForm({ ...form, questionLimit: v })} type="number" />
               <Input label="Points (per question)" value={form.points} onChange={(v) => setForm({ ...form, points: v })} type="number" />
               <div className="flex items-center gap-3 md:col-span-2">
                 <button type="button" onClick={() => setUploadMode(false)} className={cn("rounded-full px-4 py-2 text-sm font-semibold transition", !uploadMode ? "bg-cyan-300 text-slate-950" : "border border-white/10 text-slate-300")}>Manual entry</button>
@@ -374,7 +399,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
                     <span className="text-sm text-slate-400">Click to upload .csv file</span>
                     <input type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleExcelUpload(f); }} />
                   </label>
-                  {bulkQuestions.length > 0 && <p className="mt-3 text-sm font-semibold text-emerald-300">{bulkQuestions.length} questions imported</p>}
+                  {bulkQuestions.length > 0 && <p className="mt-3 text-sm font-semibold text-emerald-300">{bulkQuestions.length} questions imported. Required bank: {(Number(form.questionLimit) || 10) * 3}.</p>}
                 </div>
               ) : (
                 <>
@@ -405,7 +430,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
                   </>}
                 </>
               )}
-              <button className="rounded-full bg-cyan-300 px-5 py-3 font-bold text-slate-950 md:col-span-2">Save assessment {currentUser.role !== "Admin" ? "(→ Pending)" : ""}</button>
+              <button className="rounded-full bg-cyan-300 px-5 py-3 font-bold text-slate-950 md:col-span-2">Save assessment {!isAdminRole(currentUser.role) ? "(→ Pending)" : ""}</button>
             </form>
           </Modal>
         )}

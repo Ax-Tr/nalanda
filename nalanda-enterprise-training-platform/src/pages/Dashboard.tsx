@@ -3,11 +3,12 @@ import { motion } from "framer-motion";
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, Radar, RadarChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Panel, Metric, ProgressBar, StatusPill, Avatar, cn } from "../components";
 import type { AppData, User } from "../types";
+import { isAdminRole } from "../types";
 import { colors } from "../types";
 
 export default function Dashboard({ data, currentUser }: { data: AppData; currentUser: User }) {
   const teamIds = useMemo(() => data.users.filter((u) => u.managerId === currentUser.id).map((u) => u.id), [data.users, currentUser.id]);
-  const visibleIds = currentUser.role === "Admin" ? data.users.map((u) => u.id) : currentUser.role === "Manager" ? [currentUser.id, ...teamIds] : [currentUser.id];
+  const visibleIds = isAdminRole(currentUser.role) ? data.users.map((u) => u.id) : currentUser.role === "Manager" ? [currentUser.id, ...teamIds] : [currentUser.id];
   const vis = data.enrollments.filter((e) => visibleIds.includes(e.userId));
   const completion = vis.length ? Math.round(vis.reduce((s, e) => s + e.progress, 0) / vis.length) : 0;
   const approved = data.courses.filter((c) => c.approval === "Approved" && c.status === "Active").length;
@@ -32,10 +33,10 @@ export default function Dashboard({ data, currentUser }: { data: AppData; curren
           <div>
             <p className="text-sm uppercase tracking-[0.4em] text-cyan-100/70">Nalanda L&D Suite</p>
             <h1 className="mt-4 max-w-4xl font-display text-4xl font-semibold tracking-tight text-white md:text-5xl">
-              {currentUser.role === "Admin" ? "Enterprise training control plane" : currentUser.role === "Manager" ? "Team learning cockpit" : "Your learning workspace"}
+              {isAdminRole(currentUser.role) ? "Enterprise training control plane" : currentUser.role === "Manager" ? "Team learning cockpit" : "Your learning workspace"}
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">
-              {currentUser.role === "Admin" ? "Manage users, courses, chapters, assessments, and analytics." : currentUser.role === "Manager" ? "Create courses, assign learning, and close skill gaps." : "Complete courses, take assessments, and grow your skills."}
+              {isAdminRole(currentUser.role) ? "Manage users, courses, chapters, assessments, and analytics." : currentUser.role === "Manager" ? "Create courses, assign learning, and close skill gaps." : "Complete courses, take assessments, and grow your skills."}
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">

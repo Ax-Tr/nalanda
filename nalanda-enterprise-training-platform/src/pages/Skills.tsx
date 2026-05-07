@@ -4,6 +4,7 @@ import { AnimatePresence } from "framer-motion";
 import { Radar, RadarChart, PolarAngleAxis, PolarGrid, PolarRadiusAxis, ResponsiveContainer, Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts";
 import { Panel, StatusPill, ProgressBar, Input, Select, Modal, cn } from "../components";
 import type { AppData, Skill, SkillLevel, TargetSkill, User } from "../types";
+import { isAdminRole } from "../types";
 import { now, uid } from "../types";
 
 const levels: SkillLevel[] = ["Beginner", "Intermediate", "Advanced", "Expert"];
@@ -98,7 +99,7 @@ export default function Skills({ data, currentUser, setData }: { data: AppData; 
 
   return (
     <div className="space-y-6">
-      {currentUser.role === "Admin" && (
+      {isAdminRole(currentUser.role) && (
         <>
           <Panel title="Skill master" kicker="Admin framework" action={<button onClick={() => setSkillOpen(true)} className="rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 px-4 py-2 text-sm font-bold text-slate-950">Add skill</button>}>
             <div className="grid gap-4 lg:grid-cols-2">
@@ -146,7 +147,7 @@ export default function Skills({ data, currentUser, setData }: { data: AppData; 
         </>
       )}
 
-      {currentUser.role !== "Admin" && (
+      {!isAdminRole(currentUser.role) && (
       <>
       <Panel title="Skill analysis" kicker="Competency profile">
         <div className="grid gap-6 xl:grid-cols-2">

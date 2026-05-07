@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Panel, Modal, StatusPill, Input, Select, EmptyState } from "../components";
 import type { AppData, User, Chapter } from "../types";
+import { isAdminRole } from "../types";
 import { now, uid } from "../types";
 
 export default function Chapters({ data, currentUser, setData }: { data: AppData; currentUser: User; setData: (d: AppData) => void }) {
@@ -11,7 +12,7 @@ export default function Chapters({ data, currentUser, setData }: { data: AppData
 
   const addAudit = (d: AppData, action: string, entity: string): AppData => ({ ...d, audit: [{ id: uid("AUD"), actorId: currentUser.id, action, entity, at: now() }, ...d.audit] });
 
-  const visibleCourses = data.courses.filter((c) => currentUser.role === "Admin" || c.ownerId === currentUser.id);
+  const visibleCourses = data.courses.filter((c) => isAdminRole(currentUser.role) || c.ownerId === currentUser.id);
 
   const save = (e: FormEvent) => {
     e.preventDefault();

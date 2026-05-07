@@ -1,14 +1,171 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Panel, Modal, StatusPill, ProgressBar, Input, Select, StarRating, Avatar, cn, EmptyState } from "../components";
-import type { AppData, User, Course, Chapter, ChapterFeedback, Enrollment, SkillLevel } from "../types";
+import type { AppData, User, Course, Chapter, ChapterFeedback, Enrollment, SkillLevel, Assessment, Attempt, ProctorCapture, Question } from "../types";
+import { isAdminRole } from "../types";
 import { now, uid } from "../types";
 
 const demoPdfDataUrl = "data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCAxMTggPj4Kc3RyZWFtCkJUCi9GMSAyNCBUZgo3MiA3MjAgVGQKKE5hbGFuZGEgQ2hhcHRlciBQREYpIFRqCjAgLTQwIFRkCi9GMSAxNCBUZgooVXBsb2FkIGEgcGRmIGZyb20gdGhlIGFkbWluIGNvdXJzZSBlZGl0b3IgdG8gcmVwbGFjZSB0aGlzIGRlbW8gZG9jdW1lbnQuKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNzQgMDAwMDAgbiAKMDAwMDAwMDQ0MiAwMDAwMCBuIAp0cmFpbGVyCjw8IC9Sb290IDEgMCBSIC9TaXplIDYgPj4Kc3RhcnR4cmVmCjUxMgolJUVPRg==";
 
+function shuffleQuestions(questions: Question[], seed: string) {
+  let hash = seed.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0) || 1;
+  return [...questions].sort(() => {
+    hash = (hash * 9301 + 49297) % 233280;
+    return hash / 233280 - 0.5;
+  });
+}
+
+function ProctoredAssessment({ assessment, course, chapter, currentUser, onSubmit, onCancel }: {
+  assessment: Assessment; course: Course; chapter: Chapter; currentUser: User; onSubmit: (attempt: Attempt) => void; onCancel: () => void;
+}) {
+  const [started, setStarted] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<"Idle" | "Granted" | "Denied">("Idle");
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, string | number>>({});
+  const [warnings, setWarnings] = useState(0);
+  const [warningMessage, setWarningMessage] = useState("");
+  const [captures, setCaptures] = useState<ProctorCapture[]>([]);
+  const [startedAt, setStartedAt] = useState(now());
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const submittedRef = useRef(false);
+  const assessmentRef = useRef<HTMLDivElement | null>(null);
+  const selectedQuestions = useMemo(() => shuffleQuestions(assessment.questions, `${assessment.id}-${currentUser.id}-${Date.now()}`).slice(0, assessment.questionLimit || 10), [assessment, currentUser.id]);
+  const currentQuestion = selectedQuestions[questionIndex];
+
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  };
+
+  useEffect(() => () => stopStream(), []);
+
+  const requestPermissions = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setPermissionStatus("Granted");
+    } catch {
+      setPermissionStatus("Denied");
+      setWarningMessage("Camera and microphone permission is required before starting the assessment.");
+    }
+  };
+
+  const enterFullscreen = async () => {
+    await (assessmentRef.current || document.documentElement).requestFullscreen?.();
+  };
+
+  const start = async () => {
+    if (permissionStatus !== "Granted") {
+      await requestPermissions();
+      return;
+    }
+    setStartedAt(now());
+    setStarted(true);
+    await enterFullscreen();
+  };
+
+  const captureImage = (questionId: string) => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setCaptures((items) => [...items, { id: uid("CAP"), assessmentId: assessment.id, courseId: course.id, chapterId: chapter.id, userId: currentUser.id, questionId, imageDataUrl: canvas.toDataURL("image/jpeg", 0.7), capturedAt: now() }]);
+  };
+
+  useEffect(() => {
+    if (!started || !currentQuestion) return;
+    const timer = window.setTimeout(() => captureImage(currentQuestion.id), 3000);
+    return () => window.clearTimeout(timer);
+  }, [started, currentQuestion?.id]);
+
+  const submit = (reason: string | null = null, forcedWarnings = warnings) => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
+    const mcqs = selectedQuestions.filter((q) => q.type === "MCQ");
+    const correct = mcqs.filter((q) => answers[q.id] === q.answer).length;
+    const score = mcqs.length ? Math.round((correct / mcqs.length) * 100) : 100;
+    const maxScore = selectedQuestions.reduce((sum, q) => sum + q.points, 0);
+    stopStream();
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    onSubmit({ id: uid("ATT"), assessmentId: assessment.id, chapterId: chapter.id, courseId: course.id, userId: currentUser.id, status: score >= assessment.passScore ? "Passed" : "Failed", score, maxScore, feedback: reason ? `Auto submitted: ${reason}` : score >= assessment.passScore ? "Passed!" : "Needs improvement", answers, selectedQuestionIds: selectedQuestions.map((q) => q.id), tabSwitchWarnings: forcedWarnings, autoSubmittedReason: reason, proctorCaptures: captures, startedAt, submittedAt: now() });
+  };
+
+  const handleViolation = (message: string) => {
+    if (!started || submittedRef.current) return;
+    setWarnings((count) => {
+      const next = count + 1;
+      setWarningMessage(`${message} Warning ${next}/2. Assessment auto-submits after more than 2 warnings.`);
+      if (next > 2) window.setTimeout(() => submit(message, next), 0);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!started) return;
+    const onVisibility = () => { if (document.hidden) handleViolation("Tab switch detected."); };
+    const onBlur = () => handleViolation("Window focus changed.");
+    const onFullscreen = () => { if (!document.fullscreenElement) handleViolation("Fullscreen exited."); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("fullscreenchange", onFullscreen);
+    };
+  }, [started, warnings, answers, captures]);
+
+  return (
+    <motion.div ref={assessmentRef} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[80] overflow-y-auto bg-slate-950 p-4">
+      <div className="mx-auto max-w-5xl">
+        <video ref={videoRef} autoPlay muted playsInline className="fixed bottom-4 right-4 z-[90] h-28 w-40 rounded-2xl border border-cyan-300/30 bg-slate-900 object-cover" />
+        {!started ? (
+          <div className="mx-auto mt-8 rounded-[2rem] border border-white/10 bg-white/[0.03] p-8">
+            <StatusPill tone="amber">Proctored assessment</StatusPill>
+            <h2 className="mt-4 text-3xl font-semibold text-white">{assessment.title}</h2>
+            <p className="mt-2 text-slate-400">{course.title} - {chapter.title}</p>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              {["Camera and microphone access is mandatory.", "Assessment opens in fullscreen mode.", "Do not switch tabs, windows, or exit fullscreen.", "More than 2 violations auto-submit the attempt.", `Only ${assessment.questionLimit || 10} randomized questions are shown from the question bank.`, "A camera image is captured 3 seconds after each question appears for evaluation review."].map((rule) => <div key={rule} className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-sm text-slate-300">{rule}</div>)}
+            </div>
+            {warningMessage && <p className="mt-5 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">{warningMessage}</p>}
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button onClick={requestPermissions} className="rounded-full border border-cyan-300/30 px-5 py-3 text-sm font-bold text-cyan-100">Allow camera and mic</button>
+              <button onClick={start} disabled={permissionStatus !== "Granted"} className={cn("rounded-full px-5 py-3 text-sm font-bold", permissionStatus === "Granted" ? "bg-cyan-300 text-slate-950" : "cursor-not-allowed bg-slate-700 text-slate-400")}>Start assessment</button>
+              <button onClick={() => { stopStream(); onCancel(); }} className="rounded-full border border-white/10 px-5 py-3 text-sm text-slate-300">Cancel</button>
+            </div>
+          </div>
+        ) : currentQuestion ? (
+          <div className="mt-6 rounded-[2rem] border border-white/10 bg-white/[0.03] p-8">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex gap-2"><StatusPill tone="cyan">Question {questionIndex + 1}/{selectedQuestions.length}</StatusPill><StatusPill tone={warnings > 0 ? "amber" : "green"}>Warnings {warnings}/2</StatusPill></div>
+              <button onClick={() => submit(null)} className="rounded-full bg-cyan-300 px-5 py-2.5 text-sm font-bold text-slate-950">Submit assessment</button>
+            </div>
+            {warningMessage && <p className="mb-5 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">{warningMessage}</p>}
+            <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-6">
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{currentQuestion.points} points</p>
+              <h3 className="mt-3 text-xl font-semibold text-white">{currentQuestion.prompt}</h3>
+              {currentQuestion.type === "MCQ" ? <div className="mt-5 grid gap-3">{currentQuestion.options?.map((option, index) => <label key={option} className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 p-4 text-slate-300 hover:bg-white/5"><input type="radio" name={currentQuestion.id} checked={answers[currentQuestion.id] === index} onChange={() => setAnswers({ ...answers, [currentQuestion.id]: index })} />{option}</label>)}</div> : <textarea value={String(answers[currentQuestion.id] || "")} onChange={(e) => setAnswers({ ...answers, [currentQuestion.id]: e.target.value })} className="mt-5 min-h-32 w-full rounded-2xl border border-white/10 bg-slate-950 p-4 text-white" />}
+            </div>
+            <div className="mt-6 flex justify-between gap-3">
+              <button disabled={questionIndex === 0} onClick={() => setQuestionIndex((i) => Math.max(0, i - 1))} className="rounded-full border border-white/10 px-5 py-2.5 text-sm text-slate-300 disabled:opacity-40">Previous</button>
+              {questionIndex < selectedQuestions.length - 1 ? <button onClick={() => setQuestionIndex((i) => i + 1)} className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-slate-950">Next question</button> : <button onClick={() => submit(null)} className="rounded-full bg-emerald-300 px-5 py-2.5 text-sm font-bold text-slate-950">Finish and submit</button>}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </motion.div>
+  );
+}
+
 function ChapterPlayer({ course, chapters, enrollment, assessments, attempts, feedbacks, currentUser, onProgress, onPdfViewed, onFeedback, onAttempt, onClose }: {
-  course: Course; chapters: Chapter[]; enrollment?: Enrollment; assessments: any[]; attempts: any[]; feedbacks: ChapterFeedback[];
-  currentUser: User; onProgress: (chId: string, mins: number) => void; onPdfViewed: (mins: number) => void; onFeedback: (fb: ChapterFeedback) => void; onAttempt: (att: any) => void; onClose: () => void;
+  course: Course; chapters: Chapter[]; enrollment?: Enrollment; assessments: Assessment[]; attempts: Attempt[]; feedbacks: ChapterFeedback[];
+  currentUser: User; onProgress: (chId: string, mins: number) => void; onPdfViewed: (mins: number) => void; onFeedback: (fb: ChapterFeedback) => void; onAttempt: (att: Attempt) => void; onClose: () => void;
 }) {
   const [idx, setIdx] = useState(0);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -18,7 +175,6 @@ function ChapterPlayer({ course, chapters, enrollment, assessments, attempts, fe
   const [pdfOpenedAt, setPdfOpenedAt] = useState<number | null>(null);
   const [pdfElapsedSeconds, setPdfElapsedSeconds] = useState(0);
   const [fbForm, setFbForm] = useState({ rating: 0, clarity: 0, relevance: 0, comments: "" });
-  const [answers, setAnswers] = useState<Record<string, string | number>>({});
 
   const ch = chapters[idx];
   if (!ch) return null;
@@ -48,16 +204,6 @@ function ChapterPlayer({ course, chapters, enrollment, assessments, attempts, fe
     onFeedback({ id: uid("CF"), chapterId: ch.id, courseId: course.id, userId: currentUser.id, rating: fbForm.rating, clarity: fbForm.clarity || fbForm.rating, relevance: fbForm.relevance || fbForm.rating, comments: fbForm.comments, submittedAt: now() });
     setShowFeedback(false);
     setFbForm({ rating: 0, clarity: 0, relevance: 0, comments: "" });
-  };
-  const submitAssessment = () => {
-    if (!chAssessment) return;
-    const mcqs = chAssessment.questions.filter((q: any) => q.type === "MCQ");
-    const correct = mcqs.filter((q: any) => answers[q.id] === q.answer).length;
-    const score = mcqs.length ? Math.round((correct / mcqs.length) * 100) : 100;
-    const maxScore = chAssessment.questions.reduce((s: number, q: any) => s + q.points, 0);
-    onAttempt({ id: uid("ATT"), assessmentId: chAssessment.id, chapterId: ch.id, courseId: course.id, userId: currentUser.id, status: score >= chAssessment.passScore ? "Passed" : "Failed", score, maxScore, feedback: score >= chAssessment.passScore ? "Passed!" : "Needs improvement", answers, startedAt: now(), submittedAt: now() });
-    setShowAssessment(false);
-    setAnswers({});
   };
   const openPdfViewer = () => {
     setPdfElapsedSeconds(0);
@@ -163,33 +309,7 @@ function ChapterPlayer({ course, chapters, enrollment, assessments, attempts, fe
           </motion.div>
         )}
         {showAssessment && chAssessment && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-2xl my-8">
-              <h3 className="text-xl font-semibold text-white mb-1">{chAssessment.title}</h3>
-              <p className="text-sm text-slate-400 mb-6">Pass score: {chAssessment.passScore}% · {chAssessment.durationMinutes} min</p>
-              <div className="space-y-5">
-                {chAssessment.questions.map((q: any, qi: number) => (
-                  <div key={q.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-xs text-slate-500">Q{qi + 1} · {q.points} pts</p>
-                    <p className="mt-2 font-medium text-white">{q.prompt}</p>
-                    {q.type === "MCQ" ? (
-                      <div className="mt-3 grid gap-2">{q.options?.map((o: string, oi: number) => (
-                        <label key={oi} className="flex items-center gap-3 rounded-xl border border-white/10 p-3 text-slate-300 cursor-pointer hover:bg-white/5">
-                          <input type="radio" name={q.id} onChange={() => setAnswers({ ...answers, [q.id]: oi })} className="accent-cyan-300" />{o}
-                        </label>
-                      ))}</div>
-                    ) : (
-                      <textarea onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })} placeholder="Your answer..." className="mt-3 w-full rounded-xl border border-white/10 bg-slate-900 p-3 text-white min-h-[80px]" />
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 flex gap-3">
-                <button onClick={submitAssessment} className="rounded-full bg-cyan-400 px-5 py-2.5 text-sm font-bold text-slate-950">Submit assessment</button>
-                <button onClick={() => setShowAssessment(false)} className="rounded-full border border-white/10 px-5 py-2.5 text-sm text-slate-300">Cancel</button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <ProctoredAssessment assessment={chAssessment} course={course} chapter={ch} currentUser={currentUser} onSubmit={(attempt) => { onAttempt(attempt); setShowAssessment(false); }} onCancel={() => setShowAssessment(false)} />
         )}
         {showPdf && ch.contentType === "PDF" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[70] bg-slate-950/95 p-3 backdrop-blur-xl md:p-5">
@@ -239,7 +359,7 @@ export default function Courses({ data, currentUser, setData }: { data: AppData;
     return skillFilter === "All" || c.skillIds?.includes(skillFilter) || data.skills.find((skill) => skill.id === skillFilter)?.name === c.skill;
   });
 
-  const candidates = data.users.filter((u) => u.role !== "Admin" && u.status === "Active" && (currentUser.role === "Admin" || teamIds.includes(u.id) || u.id === currentUser.id));
+  const candidates = data.users.filter((u) => !isAdminRole(u.role) && u.status === "Active" && (isAdminRole(currentUser.role) || teamIds.includes(u.id) || u.id === currentUser.id));
 
   const resetChapterForm = () => setChapterForm({ id: "", title: "", description: "", contentType: "Rich Text", body: "", url: "", fileName: "", durationMinutes: "20" });
 
@@ -439,7 +559,7 @@ export default function Courses({ data, currentUser, setData }: { data: AppData;
                           <button onClick={() => openEditor(c)} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-white/5">Edit course</button>
                           <button onClick={() => setAssignCourse(c)} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-white/5">Assign</button>
                         </>}
-                        {currentUser.role === "Admin" && c.approval === "Pending" && <>
+                        {isAdminRole(currentUser.role) && c.approval === "Pending" && <>
                           <button disabled={!readiness.ready} onClick={() => approve(c.id)} className={cn("rounded-full px-3 py-2 text-xs font-bold", readiness.ready ? "bg-emerald-300 text-slate-950" : "cursor-not-allowed border border-white/10 text-slate-500")}>Approve</button>
                           <button onClick={() => reject(c.id)} className="rounded-full bg-rose-300 px-3 py-2 text-xs font-bold text-slate-950">Reject</button>
                         </>}
