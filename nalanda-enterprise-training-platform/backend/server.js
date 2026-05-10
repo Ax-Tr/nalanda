@@ -1,3 +1,13 @@
+const corsMiddleware = require('./middleware/cors');   // line 1 — ADD
+const healthRoute    = require('./routes/health');     // line 2 — ADD
+const app = express();
+app.use(corsMiddleware);        // line 3 — ADD (must be first middleware)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/api', healthRoute);   // line 4 — ADD (Render health check)
+// ... rest of your existing routes unchanged ...
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(Server running on port ${PORT}));
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
