@@ -16,9 +16,36 @@ app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN?.split(",") || true, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 
-const roles = ["Admin", "Manager", "User"];
+const roles = ["Super Admin", "Admin", "Manager", "Employee"];
+const adminRoles = ["Super Admin", "Admin"];
 const now = () => new Date().toISOString();
 const nextCourseId = (skill = "GN") => `NLD-${skill.slice(0, 2).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+// ── Login security & rate limiting state ──
+const loginSecurity = {};  // { email: { failedAttempts, lockedUntil, lastFailedAt } }
+const sessionVersions = {}; // { userId: number }
+const rateLimitLog = [];    // [{ ip, endpoint, at }]
+const issuedCertificates = []; // issued cert records
+const archives = [];        // deleted entity archives
+
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MS = 5 * 60 * 1000;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX = 10;
+
+const isAdmin = (role) => adminRoles.includes(role);
+
+const rateLimitCheck = (ip, endpoint) => {
+  const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+  const recent = rateLimitLog.filter((e) => e.ip === ip && e.endpoint === endpoint && e.at > cutoff);
+  return recent.length >= RATE_LIMIT_MAX;
+};
+const rateLimitRecord = (ip, endpoint) => {
+  rateLimitLog.push({ ip, endpoint, at: Date.now() });
+  // Cleanup old entries
+  const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS * 2;
+  while (rateLimitLog.length > 0 && rateLimitLog[0].at < cutoff) rateLimitLog.shift();
+};
 
 const users = [
   { id: "EMP-1001", name: "Aarav Menon", email: "aarav@nalanda.local", passwordHash: bcrypt.hashSync("Password@123", 10), department: "Sales", role: "Manager", managerId: "EMP-1288", status: "Active", createdAt: now() },
@@ -55,24 +82,35 @@ const audit = (actorId, action, entityType, entityId, metadata = {}) => {
   auditLogs.unshift({ id: uuid(), actorId, action, entityType, entityId, metadata, createdAt: now() });
 };
 
-const signToken = (user) => jwt.sign({ sub: user.id, role: user.role, department: user.department }, JWT_SECRET, { expiresIn: "30m" });
+const signToken = (user) => {
+  const sv = sessionVersions[user.id] || 0;
+  return jwt.sign({ sub: user.id, role: user.role, department: user.department, sv }, JWT_SECRET, { expiresIn: "30m" });
+};
 
 const authenticate = (req, res, next) => {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) return res.status(401).json({ error: "Missing bearer token" });
   try {
     const payload = jwt.verify(header.slice(7), JWT_SECRET);
-    const user = users.find((item) => item.id === payload.sub && item.status === "Active");
-    if (!user) return res.status(401).json({ error: "Inactive or unknown user" });
+    const user = users.find((item) => item.id === payload.sub);
+    if (!user) return res.status(401).json({ error: "Unknown user" });
+    if (user.status !== "Active") return res.status(401).json({ error: "Account deactivated — session revoked" });
+    // Check session version — reject stale tokens after deactivation/deletion
+    const currentSv = sessionVersions[user.id] || 0;
+    if (payload.sv !== undefined && payload.sv !== currentSv) {
+      return res.status(401).json({ error: "Session revoked — please sign in again" });
+    }
     req.user = user;
     return next();
   } catch {
-    return res.status(401).json({ error: "Invalid token" });
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
 const requireRole = (...allowed) => (req, res, next) => {
-  if (!allowed.includes(req.user.role)) return res.status(403).json({ error: "Forbidden" });
+  // Super Admin has access to everything Admin can do
+  const effective = req.user.role === "Super Admin" && allowed.includes("Admin") ? true : allowed.includes(req.user.role);
+  if (!effective) return res.status(403).json({ error: "Forbidden" });
   return next();
 };
 
@@ -83,11 +121,35 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.post("/api/auth/login", (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  if (rateLimitCheck(ip, "/api/auth/login")) {
+    return res.status(429).json({ error: "Too many login attempts. Please try again later." });
+  }
+  rateLimitRecord(ip, "/api/auth/login");
+
   const schema = z.object({ email: z.string().email(), password: z.string().min(8) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const user = users.find((item) => item.email === parsed.data.email && item.status === "Active");
-  if (!user || !bcrypt.compareSync(parsed.data.password, user.passwordHash)) return res.status(401).json({ error: "Invalid credentials" });
+
+  const email = parsed.data.email;
+  const security = loginSecurity[email] || { failedAttempts: 0, lockedUntil: null, lastFailedAt: null };
+
+  if (security.lockedUntil && new Date(security.lockedUntil).getTime() > Date.now()) {
+    return res.status(403).json({ error: "Account locked due to too many failed attempts", lockedUntil: security.lockedUntil });
+  }
+
+  const user = users.find((item) => item.email === email && item.status === "Active");
+  if (!user || !bcrypt.compareSync(parsed.data.password, user.passwordHash)) {
+    security.failedAttempts += 1;
+    security.lastFailedAt = now();
+    if (security.failedAttempts >= MAX_LOGIN_ATTEMPTS) {
+      security.lockedUntil = new Date(Date.now() + LOCKOUT_MS).toISOString();
+    }
+    loginSecurity[email] = security;
+    return res.status(401).json({ error: "Invalid credentials", failedAttempts: security.failedAttempts, lockedUntil: security.lockedUntil });
+  }
+
+  loginSecurity[email] = { failedAttempts: 0, lockedUntil: null, lastFailedAt: null };
   audit(user.id, "LOGIN", "USER", user.id);
   return res.json({ token: signToken(user), user: publicUser(user) });
 });
@@ -117,11 +179,16 @@ app.post("/api/users", authenticate, requireRole("Admin"), (req, res) => {
 });
 
 app.patch("/api/users/:id", authenticate, requireRole("Admin"), (req, res) => {
-  const schema = z.object({ name: z.string().min(2).optional(), department: z.string().min(2).optional(), role: z.enum(roles).optional(), managerId: z.string().nullable().optional() });
+  const schema = z.object({ name: z.string().min(2).optional(), department: z.string().min(2).optional(), role: z.enum(roles).optional(), managerId: z.string().nullable().optional(), status: z.enum(["Active", "Inactive"]).optional() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const user = users.find((item) => item.id === req.params.id);
   if (!user) return res.status(404).json({ error: "User not found" });
+  
+  if (parsed.data.status === "Inactive" && user.status === "Active") {
+    sessionVersions[user.id] = (sessionVersions[user.id] || 0) + 1;
+  }
+  
   Object.assign(user, parsed.data);
   audit(req.user.id, "UPDATE_USER", "USER", user.id, parsed.data);
   res.json({ data: publicUser(user) });
@@ -133,9 +200,42 @@ app.patch("/api/users/:id/status", authenticate, requireRole("Admin"), (req, res
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const user = users.find((item) => item.id === req.params.id);
   if (!user) return res.status(404).json({ error: "User not found" });
+  
+  if (parsed.data.status === "Inactive" && user.status === "Active") {
+    sessionVersions[user.id] = (sessionVersions[user.id] || 0) + 1;
+  }
   user.status = parsed.data.status;
+  
   audit(req.user.id, "CHANGE_USER_STATUS", "USER", user.id, parsed.data);
-  res.json({ data: publicUser(user), note: "Users are inactivated, never deleted." });
+  res.json({ data: publicUser(user), note: "Session revoked if inactivated." });
+});
+
+app.delete("/api/users/:id", authenticate, requireRole("Super Admin"), (req, res) => {
+  const schema = z.object({ deletionComment: z.string().min(10) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  
+  const idx = users.findIndex((item) => item.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "User not found" });
+  const user = users[idx];
+  
+  // Revoke session
+  sessionVersions[user.id] = (sessionVersions[user.id] || 0) + 1;
+  
+  archives.unshift({
+    id: uuid(),
+    entityType: "User",
+    entityId: user.id,
+    entityData: user,
+    deletedBy: req.user.id,
+    deletedByName: req.user.name,
+    deletionComment: parsed.data.deletionComment,
+    deletedAt: now()
+  });
+  
+  users.splice(idx, 1);
+  audit(req.user.id, "DELETE_USER", "USER", user.id);
+  res.json({ success: true, message: "User permanently deleted and archived" });
 });
 
 app.get("/api/courses", authenticate, (req, res) => {
@@ -292,6 +392,50 @@ app.post("/api/reports/export", authenticate, requireRole("Admin", "Manager"), (
   const report = { id: uuid(), requestedBy: req.user.id, status: "Ready", downloadUrl: `/exports/${uuid()}.${parsed.data.format === "PDF" ? "pdf" : "xlsx"}`, ...parsed.data, createdAt: now() };
   audit(req.user.id, "EXPORT_REPORT", "REPORT", report.id, parsed.data);
   res.status(202).json({ data: report });
+});
+
+app.get("/api/certificates", authenticate, (req, res) => {
+  let visible = issuedCertificates;
+  if (req.user.role === "Manager") {
+    const teamIds = new Set(users.filter((u) => u.managerId === req.user.id).map((u) => u.id));
+    visible = visible.filter((cert) => cert.employeeId === req.user.id || teamIds.has(cert.employeeId));
+  } else if (req.user.role === "Employee") {
+    visible = visible.filter((cert) => cert.employeeId === req.user.id);
+  }
+  res.json({ data: visible, total: visible.length });
+});
+
+app.post("/api/certificates", authenticate, requireRole("Admin"), (req, res) => {
+  const schema = z.object({ employeeId: z.string(), courseId: z.string(), title: z.string().default("Certificate of Completion"), template: z.string().default("Executive"), accent: z.string().default("#0f766e"), duration: z.string().default(""), subtitle: z.string().default(""), footer: z.string().default(""), htmlSnapshot: z.string() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  
+  const employee = users.find((u) => u.id === parsed.data.employeeId);
+  const course = courses.find((c) => c.id === parsed.data.courseId);
+  if (!employee || !course) return res.status(404).json({ error: "Employee or Course not found" });
+
+  const cert = { id: `CERT-${Math.floor(1000 + Math.random() * 9000)}`, ...parsed.data, issuedBy: req.user.id, issuedByName: req.user.name, issuedAt: now() };
+  issuedCertificates.unshift(cert);
+  audit(req.user.id, "ISSUE_CERTIFICATE", "CERTIFICATE", cert.id, { employeeId: cert.employeeId, courseId: cert.courseId });
+  res.status(201).json({ data: cert });
+});
+
+app.get("/api/archive", authenticate, requireRole("Super Admin"), (req, res) => {
+  res.json({ data: archives, total: archives.length });
+});
+
+app.post("/api/archive/:id/restore", authenticate, requireRole("Super Admin"), (req, res) => {
+  const idx = archives.findIndex((item) => item.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Archived record not found" });
+  
+  const record = archives[idx];
+  if (record.entityType === "User") users.unshift(record.entityData);
+  else if (record.entityType === "Course") courses.unshift(record.entityData);
+  else if (record.entityType === "Assessment") assessments.unshift(record.entityData);
+
+  archives.splice(idx, 1);
+  audit(req.user.id, "RESTORE_ARCHIVE", record.entityType.toUpperCase(), record.entityId);
+  res.json({ success: true, message: `${record.entityType} restored` });
 });
 
 app.get("/api/settings", authenticate, requireRole("Admin"), (_req, res) => {
