@@ -1,0 +1,40 @@
+# netlify.toml
+# Place this file at the ROOT of your GitHub repository (not inside frontend/)
+# This tells Netlify: where to find frontend, how to build it, and fixes SPA routing.
+
+[build]
+  base    = "frontend"          # subfolder where your React (Vite) app lives
+  command = "npm run build"     # build command
+  publish = "frontend/dist"     # Vite outputs to /dist (CRA uses /build — change if needed)
+
+[build.environment]
+  NODE_VERSION = "18"           # Use Node 18 LTS for Vite builds
+
+# ─── SPA Routing Fix ──────────────────────────────────────────────────────────
+# Without this, refreshing any page other than "/" returns a 404 on Netlify.
+# This rule tells Netlify to always serve index.html and let React Router handle routing.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+# ─── API Proxy (Optional but Recommended) ─────────────────────────────────────
+# If you want to avoid CORS issues entirely, proxy /api/* calls through Netlify
+# to your Render backend. This makes all API calls appear same-origin.
+# Uncomment the block below if you want to use this approach:
+#
+# [[redirects]]
+#   from   = "/api/*"
+#   to     = "https://nalanda-backend.onrender.com/api/:splat"
+#   status = 200
+#   force  = true
+#   headers = {X-From = "Netlify"}
+
+# ─── Security Headers ─────────────────────────────────────────────────────────
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options        = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy        = "strict-origin-when-cross-origin"
+    Permissions-Policy     = "camera=(), microphone=(), geolocation=()"
