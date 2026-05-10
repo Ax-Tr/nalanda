@@ -150,10 +150,17 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
     };
 
     if (editing) {
-      setData(addAudit({
+      let nextData = addAudit({
         ...data,
         users: data.users.map((user) => user.id === editing.id ? { ...user, ...baseUser } : user),
-      }, "Updated employee profile", editing.id));
+      }, "Updated employee profile", editing.id);
+      // If status changed to Inactive, increment sessionVersion to revoke sessions
+      if (form.status === "Inactive" && editing.status === "Active") {
+        const sv = { ...(nextData.sessionVersion || {}) };
+        sv[editing.id] = (sv[editing.id] || 0) + 1;
+        nextData = { ...nextData, sessionVersion: sv };
+      }
+      setData(nextData);
       toast("Employee updated successfully");
     } else {
       if (data.users.some((user) => user.id === form.employeeId)) return;
@@ -174,8 +181,15 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
   };
 
   const patch = (id: string, patchData: Partial<User>, action = "Updated employee") => {
-    setData(addAudit({ ...data, users: data.users.map((user) => user.id === id ? { ...user, ...patchData } : user) }, action, id));
-    if (action.includes("Deactivated")) toast("Employee deactivated successfully");
+    let nextData = addAudit({ ...data, users: data.users.map((user) => user.id === id ? { ...user, ...patchData } : user) }, action, id);
+    // Increment sessionVersion when deactivating to immediately revoke active sessions
+    if (patchData.status === "Inactive") {
+      const sv = { ...(nextData.sessionVersion || {}) };
+      sv[id] = (sv[id] || 0) + 1;
+      nextData = { ...nextData, sessionVersion: sv };
+    }
+    setData(nextData);
+    if (action.includes("Deactivated")) toast("Employee deactivated — active sessions revoked");
     else if (action.includes("Activated")) toast("Employee activated successfully");
   };
 
@@ -191,13 +205,17 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
       deletionComment: comment,
       deletedAt: now(),
     };
+    // Increment sessionVersion to revoke any active session before deletion
+    const sv = { ...(data.sessionVersion || {}) };
+    sv[deleteTarget.id] = (sv[deleteTarget.id] || 0) + 1;
     setData(addAudit({
       ...data,
       users: data.users.filter((user) => user.id !== deleteTarget.id),
       archive: [archived, ...(data.archive || [])],
-    }, "Permanently deleted user", deleteTarget.id));
+      sessionVersion: sv,
+    }, "Permanently deleted user — sessions revoked", deleteTarget.id));
     setDeleteTarget(null);
-    toast("User deleted successfully");
+    toast("User deleted — all sessions revoked");
   };
 
   const downloadSample = () => {

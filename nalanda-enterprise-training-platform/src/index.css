@@ -22,6 +22,39 @@
   --backdrop-blur: 20px;
 }
 
+/* ── Custom Cursors ── */
+/* Default cursor: pen nib across the entire app */
+*, *::before, *::after {
+  cursor: url('/cursors/pen-nib.svg') 2 2, auto !important;
+}
+
+/* Silver hand pointer for all interactive / clickable elements */
+a, button, [role="button"], [role="tab"], [role="menuitem"], [role="option"],
+[role="link"], [role="checkbox"], [role="radio"], [role="switch"],
+label, select, summary, [tabindex]:not([tabindex="-1"]),
+input[type="submit"], input[type="button"], input[type="reset"],
+input[type="checkbox"], input[type="radio"], input[type="range"],
+input[type="file"], input[type="color"],
+.action-btn, .cursor-pointer, [onclick],
+th[aria-sort], details > summary {
+  cursor: url('/cursors/silver-hand.svg') 12 1, pointer !important;
+}
+
+/* Also apply silver hand on hover state for interactive elements */
+a:hover, button:hover, [role="button"]:hover, select:hover,
+.action-btn:hover, [tabindex]:not([tabindex="-1"]):hover,
+label:hover, summary:hover {
+  cursor: url('/cursors/silver-hand.svg') 12 1, pointer !important;
+}
+
+/* Text inputs keep a text-select feel but with pen nib base */
+input[type="text"], input[type="email"], input[type="password"],
+input[type="number"], input[type="search"], input[type="tel"],
+input[type="url"], input[type="date"], input[type="time"],
+input[type="datetime-local"], textarea, [contenteditable="true"] {
+  cursor: url('/cursors/pen-nib.svg') 2 2, text !important;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(103, 232, 249, 0.35) rgba(15, 23, 42, 0.7);

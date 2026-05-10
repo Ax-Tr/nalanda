@@ -6,6 +6,12 @@ export type Approval = "Approved" | "Pending" | "Rejected";
 export type AssessmentType = "MCQ" | "Descriptive" | "Mixed";
 export type SkillLevel = "Beginner" | "Intermediate" | "Advanced" | "Expert";
 
+export type LoginSecurity = {
+  failedAttempts: number;
+  lockedUntil: string | null;
+  lastFailedAt: string | null;
+};
+
 export type User = {
   id: string;
   name: string;
@@ -209,6 +215,22 @@ export type ArchivedRecord = {
   deletedAt: string;
 };
 
+export type IssuedCertificate = {
+  id: string;
+  employeeId: string;
+  courseId: string;
+  title: string;
+  template: string;
+  accent: string;
+  duration: string;
+  subtitle: string;
+  footer: string;
+  issuedBy: string;
+  issuedByName: string;
+  issuedAt: string;
+  htmlSnapshot: string;
+};
+
 export type AppData = {
   users: User[];
   skills: Skill[];
@@ -222,6 +244,9 @@ export type AppData = {
   skillRatings: SkillRating[];
   audit: Audit[];
   archive: ArchivedRecord[];
+  loginSecurity: Record<string, LoginSecurity>;
+  sessionVersion: Record<string, number>;
+  issuedCertificates: IssuedCertificate[];
 };
 
 export const navByRole: Record<Role, { key: ModuleKey; label: string; icon: string }[]> = {

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn, Avatar, ToastNotification } from "./components";
 import { navByRole, uid, now } from "./types";
-import type { AppData, ModuleKey, User } from "./types";
+import type { AppData, ModuleKey, User, LoginSecurity } from "./types";
 import { seedData } from "./seedData";
 import { setToastHandler } from "./toast";
 import Login from "./pages/Login";
@@ -124,6 +124,9 @@ function normalizeData(data: AppData): AppData {
       proctorCaptures: attempt.proctorCaptures || [],
     })),
     archive: data.archive || [],
+    loginSecurity: data.loginSecurity || {},
+    sessionVersion: data.sessionVersion || {},
+    issuedCertificates: data.issuedCertificates || [],
   };
 }
 
@@ -131,9 +134,11 @@ export default function App() {
   const [rawData, setDataState] = useLocalState<AppData>("nalanda-v3", seedData);
   const data = normalizeData(rawData);
   const [sessionId, setSessionId] = useLocalState<string | null>("nalanda-session-v3", null);
+  const [sessionVersion, setSessionVersion] = useLocalState<number | null>("nalanda-session-ver", null);
   const [module, setModule] = useState<ModuleKey>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const sessionRevokedRef = useRef(false);
 
   useEffect(() => {
     setToastHandler((msg) => {
@@ -144,14 +149,66 @@ export default function App() {
 
   const currentUser = data.users.find((u) => u.id === sessionId && u.status === "Active") || null;
   const setData = (next: AppData) => setDataState(next);
-  const signIn = (u: User) => { setSessionId(u.id); setData({ ...data, audit: [{ id: uid("AUD"), actorId: u.id, action: "Signed in", entity: u.id, at: now() }, ...data.audit] }); };
-  const resetDemo = () => { setDataState(seedData); setSessionId(null); };
+
+  const signIn = (u: User) => {
+    const ver = data.sessionVersion?.[u.id] || 0;
+    setSessionId(u.id);
+    setSessionVersion(ver);
+    sessionRevokedRef.current = false;
+    setData({ ...data, audit: [{ id: uid("AUD"), actorId: u.id, action: "Signed in", entity: u.id, at: now() }, ...data.audit] });
+  };
+
+  const forceSignOut = useCallback((reason: string) => {
+    if (sessionRevokedRef.current) return;
+    sessionRevokedRef.current = true;
+    setSessionId(null);
+    setSessionVersion(null);
+    setToastMsg(reason);
+  }, [setSessionId, setSessionVersion]);
+
+  const resetDemo = () => { setDataState(seedData); setSessionId(null); setSessionVersion(null); };
+
+  const handleUpdateSecurity = useCallback((next: Record<string, LoginSecurity>) => {
+    setDataState((prev) => {
+      const normalized = normalizeData(prev);
+      return { ...normalized, loginSecurity: next };
+    });
+  }, [setDataState]);
+
+  // Periodic session validation — every 5 seconds
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const validate = () => {
+      const freshData = normalizeData(rawData);
+      const user = freshData.users.find((u) => u.id === sessionId);
+
+      if (!user) {
+        forceSignOut("Session expired — your account has been deleted.");
+        return;
+      }
+      if (user.status !== "Active") {
+        forceSignOut("Session revoked — your account has been deactivated.");
+        return;
+      }
+      const currentVer = freshData.sessionVersion?.[sessionId] || 0;
+      if (sessionVersion !== null && currentVer !== sessionVersion) {
+        forceSignOut("Session revoked — your access has been changed by an administrator.");
+        return;
+      }
+    };
+
+    const interval = setInterval(validate, 5000);
+    // Also validate immediately
+    validate();
+    return () => clearInterval(interval);
+  }, [sessionId, sessionVersion, rawData, forceSignOut]);
 
   useEffect(() => {
     if (currentUser && !navByRole[currentUser.role].some((n) => n.key === module)) setModule("dashboard");
   }, [currentUser, module]);
 
-  if (!currentUser) return <Login users={data.users} onLogin={signIn} />;
+  if (!currentUser) return <Login users={data.users} data={data} onLogin={signIn} onUpdateSecurity={handleUpdateSecurity} />;
 
   const nav = navByRole[currentUser.role];
 
@@ -166,7 +223,7 @@ export default function App() {
       case "team": return <Team data={data} currentUser={currentUser} />;
       case "settings": return <Settings data={data} currentUser={currentUser} setData={setData} />;
       case "reports": return <Reports data={data} currentUser={currentUser} />;
-      case "certificates": return <Certificates data={data} currentUser={currentUser} />;
+      case "certificates": return <Certificates data={data} currentUser={currentUser} setData={setData} />;
       case "evaluation": return <Evaluation data={data} currentUser={currentUser} />;
       case "archive": return <Archive data={data} currentUser={currentUser} setData={setData} />;
       default: return <Dashboard data={data} currentUser={currentUser} />;
