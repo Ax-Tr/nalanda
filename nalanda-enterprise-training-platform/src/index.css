@@ -113,3 +113,24 @@ input[type="checkbox"], input[type="radio"] {
 a, button, input, select, textarea {
   transition: all 0.2s ease;
 }
+
+/* Metallic silver hover for action buttons */
+.action-btn:hover {
+  background: linear-gradient(135deg, #8899aa 0%, #b0bec5 28%, #cfd8dc 50%, #b0bec5 72%, #8899aa 100%) !important;
+  color: #0f172a !important;
+  border-color: rgba(176, 190, 197, 0.6) !important;
+  box-shadow: 0 2px 12px rgba(176, 190, 197, 0.25), inset 0 1px 0 rgba(255,255,255,0.3);
+  text-shadow: 0 1px 0 rgba(255,255,255,0.2);
+}
+
+/* Toast slide-in animation */
+@keyframes toast-in {
+  0% { transform: translateX(120%); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+@keyframes toast-out {
+  0% { transform: translateX(0); opacity: 1; }
+  100% { transform: translateX(120%); opacity: 0; }
+}
+.toast-enter { animation: toast-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.toast-exit { animation: toast-out 0.3s ease-in forwards; }

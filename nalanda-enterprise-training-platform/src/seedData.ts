@@ -155,4 +155,5 @@ export const seedData: AppData = {
     { id: "SK-011", userId: "EMP-1002", skill: "Leadership", score: 88, assessmentsBased: 2, trend: "up", lastUpdated: now() },
   ],
   audit: [{ id: "AUD-001", actorId: "EMP-1001", action: "System initialized", entity: "SYSTEM", at: now() }],
+  archive: [],
 };

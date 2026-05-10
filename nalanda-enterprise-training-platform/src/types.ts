@@ -1,6 +1,6 @@
 // Types for the Nalanda L&D Platform
 export type Role = "Super Admin" | "Admin" | "Manager" | "Employee";
-export type ModuleKey = "dashboard" | "my-learning" | "courses" | "chapters" | "assessments" | "team" | "users" | "settings" | "skills" | "reports" | "certificates" | "evaluation";
+export type ModuleKey = "dashboard" | "my-learning" | "courses" | "chapters" | "assessments" | "team" | "users" | "settings" | "skills" | "reports" | "certificates" | "evaluation" | "archive";
 export type Status = "Active" | "Inactive";
 export type Approval = "Approved" | "Pending" | "Rejected";
 export type AssessmentType = "MCQ" | "Descriptive" | "Mixed";
@@ -90,6 +90,7 @@ export type Assessment = {
   type: AssessmentType;
   ownerId: string;
   approval: Approval;
+  status?: Status;
   difficulty?: "Beginner" | "Intermediate" | "Advanced";
   durationMinutes: number;
   passScore: number;
@@ -192,6 +193,22 @@ export type Audit = {
   at: string;
 };
 
+export type ArchivedRecord = {
+  id: string;
+  entityType: "User" | "Course" | "Assessment";
+  entityId: string;
+  entityData: User | Course | Assessment;
+  relatedData?: {
+    chapters?: Chapter[];
+    enrollments?: Enrollment[];
+    assessments?: Assessment[];
+  };
+  deletedBy: string;
+  deletedByName: string;
+  deletionComment: string;
+  deletedAt: string;
+};
+
 export type AppData = {
   users: User[];
   skills: Skill[];
@@ -204,6 +221,7 @@ export type AppData = {
   chapterFeedbacks: ChapterFeedback[];
   skillRatings: SkillRating[];
   audit: Audit[];
+  archive: ArchivedRecord[];
 };
 
 export const navByRole: Record<Role, { key: ModuleKey; label: string; icon: string }[]> = {
@@ -216,6 +234,7 @@ export const navByRole: Record<Role, { key: ModuleKey; label: string; icon: stri
     { key: "reports", label: "Reports", icon: "reports" },
     { key: "certificates", label: "Certificates", icon: "certificates" },
     { key: "evaluation", label: "Evaluation", icon: "evaluation" },
+    { key: "archive", label: "Archive", icon: "archive" },
     { key: "settings", label: "Profile", icon: "settings" },
   ],
   Admin: [

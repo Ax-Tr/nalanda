@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Panel, Modal, StatusPill, Input, Select, EmptyState, cn } from "../components";
-import type { AppData, User, Assessment, AssessmentType, Question } from "../types";
+import { Panel, Modal, StatusPill, Input, Select, EmptyState, DeleteConfirmModal, cn } from "../components";
+import type { AppData, User, Assessment, AssessmentType, Question, ArchivedRecord } from "../types";
 import { isAdminRole } from "../types";
 import { now, uid } from "../types";
+import { toast } from "../toast";
 
 type BulkQuestion = { prompt: string; type: "MCQ" | "Descriptive"; options: string[]; answer: number; points: number };
 
@@ -57,6 +58,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
   const [bulkQuestions, setBulkQuestions] = useState<BulkQuestion[]>([]);
   const [uploadMode, setUploadMode] = useState(false);
   const [skillFilter, setSkillFilter] = useState("All");
+  const [deleteTarget, setDeleteTarget] = useState<Assessment | null>(null);
 
   const addAudit = (d: AppData, a: string, e: string): AppData => ({ ...d, audit: [{ id: uid("AUD"), actorId: currentUser.id, action: a, entity: e, at: now() }, ...d.audit] });
 
@@ -150,6 +152,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
     setCreateOpen(false);
     setBulkQuestions([]);
     setUploadMode(false);
+    toast("Assessment created successfully");
   };
 
   const saveEdit = () => {
@@ -171,6 +174,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
     const assessments = data.assessments.map((item) => item.id === editing.id ? updated : item);
     setData(addAudit({ ...data, assessments }, "Updated assessment", editing.id));
     setEditing(updated);
+    toast("Assessment saved successfully");
   };
 
   const updateQuestion = (questionId: string, patch: Partial<Question>) => {
@@ -214,8 +218,38 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "assessment-template.csv"; link.click();
   };
 
-  const approve = (id: string) => setData(addAudit({ ...data, assessments: data.assessments.map((a) => a.id === id ? { ...a, approval: "Approved" as const, updatedAt: now() } : a) }, "Approved assessment", id));
-  const reject = (id: string) => setData(addAudit({ ...data, assessments: data.assessments.map((a) => a.id === id ? { ...a, approval: "Rejected" as const, updatedAt: now() } : a) }, "Rejected assessment", id));
+  const approve = (id: string) => { setData(addAudit({ ...data, assessments: data.assessments.map((a) => a.id === id ? { ...a, approval: "Approved" as const, updatedAt: now() } : a) }, "Approved assessment", id)); toast("Assessment approved successfully"); };
+  const reject = (id: string) => { setData(addAudit({ ...data, assessments: data.assessments.map((a) => a.id === id ? { ...a, approval: "Rejected" as const, updatedAt: now() } : a) }, "Rejected assessment", id)); toast("Assessment rejected"); };
+
+  const toggleAssessmentStatus = (assessment: Assessment) => {
+    const newStatus = (assessment.status || "Active") === "Active" ? "Inactive" : "Active";
+    setData(addAudit({
+      ...data,
+      assessments: data.assessments.map((a) => a.id === assessment.id ? { ...a, status: newStatus as any, updatedAt: now() } : a),
+    }, newStatus === "Inactive" ? "Deactivated assessment" : "Activated assessment", assessment.id));
+    toast(newStatus === "Inactive" ? "Assessment deactivated successfully" : "Assessment activated successfully");
+  };
+
+  const handleDeleteAssessment = (comment: string) => {
+    if (!deleteTarget) return;
+    const archived: ArchivedRecord = {
+      id: uid("ARC"),
+      entityType: "Assessment",
+      entityId: deleteTarget.id,
+      entityData: { ...deleteTarget },
+      deletedBy: currentUser.id,
+      deletedByName: currentUser.name,
+      deletionComment: comment,
+      deletedAt: now(),
+    };
+    setData(addAudit({
+      ...data,
+      assessments: data.assessments.filter((a) => a.id !== deleteTarget.id),
+      archive: [archived, ...(data.archive || [])],
+    }, "Permanently deleted assessment", deleteTarget.id));
+    setDeleteTarget(null);
+    toast("Assessment deleted successfully");
+  };
 
   if (currentUser.role === "Employee") {
     return <Panel title="Assessments" kicker="Notice"><p className="text-slate-400">Assessments are accessed through your course chapters. Open a course to take chapter assessments.</p></Panel>;
@@ -327,6 +361,7 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
                     <StatusPill tone={assessment.approval === "Approved" ? "green" : assessment.approval === "Rejected" ? "red" : "amber"}>{assessment.approval}</StatusPill>
                     {skill && <StatusPill tone="violet">{skill.name}</StatusPill>}
                     <StatusPill>{assessment.difficulty || course?.difficulty || "Beginner"}</StatusPill>
+                    {(assessment.status === "Inactive") && <StatusPill tone="red">Inactive</StatusPill>}
                   </div>
                   <h3 className="text-lg font-semibold text-white">{assessment.title}</h3>
                   <p className="mt-1 text-sm text-slate-400">Course: {course?.title || assessment.courseId}</p>
@@ -338,11 +373,13 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
                     <div className="rounded-xl border border-white/10 p-2"><p className="text-xs text-slate-500">Bank / shown</p><p className="font-semibold text-white">{assessment.questions.length}/{assessment.questionLimit || 10}</p></div>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <button onClick={() => openEditPage(assessment)} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-white/5">Edit</button>
+                    <button onClick={() => openEditPage(assessment)} className="action-btn rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100">Edit</button>
+                    {isAdminRole(currentUser.role) && <button onClick={() => toggleAssessmentStatus(assessment)} className={cn("action-btn rounded-full border px-3 py-2 text-xs font-semibold", (assessment.status || "Active") === "Active" ? "border-amber-300/30 text-amber-200" : "border-emerald-300/30 text-emerald-200")}>{(assessment.status || "Active") === "Active" ? "Deactivate" : "Activate"}</button>}
                     {isAdminRole(currentUser.role) && assessment.approval === "Pending" && <>
-                      <button onClick={() => approve(assessment.id)} className="rounded-full bg-emerald-300 px-3 py-2 text-xs font-bold text-slate-950">Approve</button>
-                      <button onClick={() => reject(assessment.id)} className="rounded-full bg-rose-300 px-3 py-2 text-xs font-bold text-slate-950">Reject</button>
+                      <button onClick={() => approve(assessment.id)} className="action-btn rounded-full bg-emerald-300 px-3 py-2 text-xs font-bold text-slate-950">Approve</button>
+                      <button onClick={() => reject(assessment.id)} className="action-btn rounded-full bg-rose-300 px-3 py-2 text-xs font-bold text-slate-950">Reject</button>
                     </>}
+                    {currentUser.role === "Super Admin" && <button onClick={() => setDeleteTarget(assessment)} className="action-btn rounded-full border border-rose-300/30 bg-rose-300/10 px-3 py-2 text-xs font-semibold text-rose-200">Delete</button>}
                   </div>
                 </article>
               );
@@ -433,6 +470,15 @@ export default function Assessments({ data, currentUser, setData }: { data: AppD
               <button className="rounded-full bg-cyan-300 px-5 py-3 font-bold text-slate-950 md:col-span-2">Save assessment {!isAdminRole(currentUser.role) ? "(→ Pending)" : ""}</button>
             </form>
           </Modal>
+        )}
+        {deleteTarget && (
+          <DeleteConfirmModal
+            entityType="Assessment"
+            entityName={deleteTarget.title}
+            entityId={deleteTarget.id}
+            onConfirm={handleDeleteAssessment}
+            onClose={() => setDeleteTarget(null)}
+          />
         )}
       </AnimatePresence>
     </div>

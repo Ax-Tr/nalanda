@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Panel, Modal, StatusPill, ProgressBar, Input, Select, StarRating, Avatar, cn, EmptyState } from "../components";
-import type { AppData, User, Course, Chapter, ChapterFeedback, Enrollment, SkillLevel, Assessment, Attempt, ProctorCapture, Question } from "../types";
+import { Panel, Modal, StatusPill, ProgressBar, Input, Select, StarRating, Avatar, cn, EmptyState, DeleteConfirmModal } from "../components";
+import type { AppData, User, Course, Chapter, ChapterFeedback, Enrollment, SkillLevel, Assessment, Attempt, ProctorCapture, Question, ArchivedRecord } from "../types";
 import { isAdminRole } from "../types";
 import { now, uid } from "../types";
+import { toast } from "../toast";
 
 const demoPdfDataUrl = "data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCAxMTggPj4Kc3RyZWFtCkJUCi9GMSAyNCBUZgo3MiA3MjAgVGQKKE5hbGFuZGEgQ2hhcHRlciBQREYpIFRqCjAgLTQwIFRkCi9GMSAxNCBUZgooVXBsb2FkIGEgcGRmIGZyb20gdGhlIGFkbWluIGNvdXJzZSBlZGl0b3IgdG8gcmVwbGFjZSB0aGlzIGRlbW8gZG9jdW1lbnQuKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNzQgMDAwMDAgbiAKMDAwMDAwMDQ0MiAwMDAwMCBuIAp0cmFpbGVyCjw8IC9Sb290IDEgMCBSIC9TaXplIDYgPj4Kc3RhcnR4cmVmCjUxMgolJUVPRg==";
 
@@ -345,6 +346,7 @@ export default function Courses({ data, currentUser, setData }: { data: AppData;
   const [editCourse, setEditCourse] = useState<Course | null>(null);
   const [assignCourse, setAssignCourse] = useState<Course | null>(null);
   const [skillFilter, setSkillFilter] = useState("All");
+  const [deleteTarget, setDeleteTarget] = useState<Course | null>(null);
   const [form, setForm] = useState({ title: "", description: "", skillId: data.skills[0]?.id || "", category: "Technical", tags: "", targetLevel: "Beginner" as SkillLevel, difficulty: "Beginner" as Course["difficulty"], estimatedHours: "4" });
   const [editForm, setEditForm] = useState({ title: "", description: "", skillId: "", category: "", tags: "", targetLevel: "Beginner" as SkillLevel, difficulty: "Beginner" as Course["difficulty"], estimatedHours: "4" });
   const [chapterForm, setChapterForm] = useState({ id: "", title: "", description: "", contentType: "Rich Text" as Chapter["contentType"], body: "", url: "", fileName: "", durationMinutes: "20" });
@@ -399,14 +401,57 @@ export default function Courses({ data, currentUser, setData }: { data: AppData;
     setData(addAudit({ ...data, courses: [c, ...data.courses] }, "Created course", c.id));
     setCreateOpen(false);
     setForm({ title: "", description: "", skillId: data.skills[0]?.id || "", category: "Technical", tags: "", targetLevel: "Beginner", difficulty: "Beginner", estimatedHours: "4" });
+    toast("Course created successfully");
   };
 
   const approve = (id: string) => {
     const course = data.courses.find((c) => c.id === id);
     if (!course || !getReadiness(course).ready) return;
     setData(addAudit({ ...data, courses: data.courses.map((c) => c.id === id ? { ...c, approval: "Approved" as const, updatedAt: now() } : c) }, "Approved course", id));
+    toast("Course approved successfully");
   };
-  const reject = (id: string) => setData(addAudit({ ...data, courses: data.courses.map((c) => c.id === id ? { ...c, approval: "Rejected" as const, status: "Inactive" as const, updatedAt: now() } : c) }, "Rejected course", id));
+  const reject = (id: string) => { setData(addAudit({ ...data, courses: data.courses.map((c) => c.id === id ? { ...c, approval: "Rejected" as const, status: "Inactive" as const, updatedAt: now() } : c) }, "Rejected course", id)); toast("Course rejected"); };
+
+  const toggleCourseStatus = (course: Course) => {
+    const newStatus = course.status === "Active" ? "Inactive" : "Active";
+    setData(addAudit({
+      ...data,
+      courses: data.courses.map((c) => c.id === course.id ? { ...c, status: newStatus as any, updatedAt: now() } : c),
+    }, newStatus === "Inactive" ? "Deactivated course" : "Activated course", course.id));
+    toast(newStatus === "Inactive" ? "Course deactivated successfully" : "Course activated successfully");
+  };
+
+  const handleDeleteCourse = (comment: string) => {
+    if (!deleteTarget) return;
+    const relatedChapters = data.chapters.filter((ch) => ch.courseId === deleteTarget.id);
+    const relatedAssessments = data.assessments.filter((a) => a.courseId === deleteTarget.id);
+    const relatedEnrollments = data.enrollments.filter((e) => e.courseId === deleteTarget.id);
+    const archived: ArchivedRecord = {
+      id: uid("ARC"),
+      entityType: "Course",
+      entityId: deleteTarget.id,
+      entityData: { ...deleteTarget },
+      relatedData: {
+        chapters: relatedChapters,
+        assessments: relatedAssessments,
+        enrollments: relatedEnrollments,
+      },
+      deletedBy: currentUser.id,
+      deletedByName: currentUser.name,
+      deletionComment: comment,
+      deletedAt: now(),
+    };
+    setData(addAudit({
+      ...data,
+      courses: data.courses.filter((c) => c.id !== deleteTarget.id),
+      chapters: data.chapters.filter((ch) => ch.courseId !== deleteTarget.id),
+      assessments: data.assessments.filter((a) => a.courseId !== deleteTarget.id),
+      enrollments: data.enrollments.filter((e) => e.courseId !== deleteTarget.id),
+      archive: [archived, ...(data.archive || [])],
+    }, "Permanently deleted course", deleteTarget.id));
+    setDeleteTarget(null);
+    toast("Course deleted successfully");
+  };
   const saveCourseEdits = () => {
     if (!editCourse) return;
     const selectedSkill = data.skills.find((skill) => skill.id === editForm.skillId);
@@ -543,6 +588,7 @@ export default function Courses({ data, currentUser, setData }: { data: AppData;
                         <StatusPill tone={readiness.ready ? "green" : "red"}>{readiness.ready ? "Ready" : "Needs setup"}</StatusPill>
                         <StatusPill tone="violet">{c.difficulty}</StatusPill>
                         <StatusPill>{chs.length} chapters</StatusPill>
+                        {c.status === "Inactive" && <StatusPill tone="red">Inactive</StatusPill>}
                       </div>
                       <h3 className="mt-4 text-xl font-semibold text-white">{c.title}</h3>
                       <p className="mt-2 text-sm text-slate-400 leading-6">{c.description}</p>
@@ -554,15 +600,17 @@ export default function Courses({ data, currentUser, setData }: { data: AppData;
                       <p className="text-xs text-slate-500">Skill: {c.skill} · {c.estimatedHours}h · v{c.version}</p>
                       {!readiness.ready && <p className="text-xs leading-5 text-amber-200">Approval blocked: {readiness.issues.join(", ")}</p>}
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => setPlayCourse(c)} className="rounded-full bg-cyan-300 px-3 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-200">Open</button>
+                        <button onClick={() => setPlayCourse(c)} className="action-btn rounded-full bg-cyan-300 px-3 py-2 text-xs font-bold text-slate-950">Open</button>
                         {currentUser.role !== "Employee" && <>
-                          <button onClick={() => openEditor(c)} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-white/5">Edit course</button>
-                          <button onClick={() => setAssignCourse(c)} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-white/5">Assign</button>
+                          <button onClick={() => openEditor(c)} className="action-btn rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-violet-100">Edit course</button>
+                          <button onClick={() => setAssignCourse(c)} className="action-btn rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100">Assign</button>
                         </>}
+                        {isAdminRole(currentUser.role) && <button onClick={() => toggleCourseStatus(c)} className={cn("action-btn rounded-full border px-3 py-2 text-xs font-semibold", c.status === "Active" ? "border-amber-300/30 text-amber-200" : "border-emerald-300/30 text-emerald-200")}>{c.status === "Active" ? "Deactivate" : "Activate"}</button>}
                         {isAdminRole(currentUser.role) && c.approval === "Pending" && <>
-                          <button disabled={!readiness.ready} onClick={() => approve(c.id)} className={cn("rounded-full px-3 py-2 text-xs font-bold", readiness.ready ? "bg-emerald-300 text-slate-950" : "cursor-not-allowed border border-white/10 text-slate-500")}>Approve</button>
-                          <button onClick={() => reject(c.id)} className="rounded-full bg-rose-300 px-3 py-2 text-xs font-bold text-slate-950">Reject</button>
+                          <button disabled={!readiness.ready} onClick={() => approve(c.id)} className={cn("action-btn rounded-full px-3 py-2 text-xs font-bold", readiness.ready ? "bg-emerald-300 text-slate-950" : "cursor-not-allowed border border-white/10 text-slate-500")}>Approve</button>
+                          <button onClick={() => reject(c.id)} className="action-btn rounded-full bg-rose-300 px-3 py-2 text-xs font-bold text-slate-950">Reject</button>
                         </>}
+                        {currentUser.role === "Super Admin" && <button onClick={() => setDeleteTarget(c)} className="action-btn rounded-full border border-rose-300/30 bg-rose-300/10 px-3 py-2 text-xs font-semibold text-rose-200">Delete</button>}
                       </div>
                     </div>
                   </div>
@@ -732,6 +780,15 @@ export default function Courses({ data, currentUser, setData }: { data: AppData;
             onFeedback={handleFeedback}
             onAttempt={handleAttempt}
             onClose={() => setPlayCourse(null)}
+          />
+        )}
+        {deleteTarget && (
+          <DeleteConfirmModal
+            entityType="Course"
+            entityName={deleteTarget.title}
+            entityId={deleteTarget.id}
+            onConfirm={handleDeleteCourse}
+            onClose={() => setDeleteTarget(null)}
           />
         )}
       </AnimatePresence>

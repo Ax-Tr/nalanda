@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { cn, Avatar } from "./components";
+import { cn, Avatar, ToastNotification } from "./components";
 import { navByRole, uid, now } from "./types";
 import type { AppData, ModuleKey, User } from "./types";
 import { seedData } from "./seedData";
+import { setToastHandler } from "./toast";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Courses from "./pages/Courses";
@@ -15,6 +16,7 @@ import Settings from "./pages/Settings";
 import Reports from "./pages/Reports";
 import Certificates from "./pages/Certificates";
 import Evaluation from "./pages/Evaluation";
+import Archive from "./pages/Archive";
 
 function ModuleGlyph({ icon, active }: { icon: string; active: boolean }) {
   const palette: Record<string, string> = {
@@ -26,6 +28,7 @@ function ModuleGlyph({ icon, active }: { icon: string; active: boolean }) {
     reports: "from-rose-300 via-pink-400 to-violet-600",
     certificates: "from-yellow-200 via-amber-300 to-orange-500",
     evaluation: "from-red-300 via-orange-400 to-amber-500",
+    archive: "from-rose-300 via-red-400 to-rose-600",
     settings: "from-slate-200 via-slate-400 to-slate-700",
     team: "from-blue-300 via-cyan-400 to-emerald-500",
     "my-learning": "from-cyan-200 via-emerald-300 to-lime-500",
@@ -48,9 +51,16 @@ function useLocalState<T>(key: string, init: T) {
 }
 
 function normalizeData(data: AppData): AppData {
+  // Collect all archived entity IDs to prevent re-adding deleted items from seed
+  const archivedIds = new Set((data.archive || []).map((r) => r.entityId));
+  (data.archive || []).forEach((r) => {
+    r.relatedData?.chapters?.forEach((ch) => archivedIds.add(ch.id));
+    r.relatedData?.assessments?.forEach((a) => archivedIds.add(a.id));
+  });
+
   const mergeById = <T extends { id: string }>(current: T[], seeded: T[]) => {
     const currentIds = new Set(current.map((item) => item.id));
-    return [...current, ...seeded.filter((item) => !currentIds.has(item.id))];
+    return [...current, ...seeded.filter((item) => !currentIds.has(item.id) && !archivedIds.has(item.id))];
   };
 
   const existingUserIds = new Set(data.users.map((user) => user.id));
@@ -63,7 +73,7 @@ function normalizeData(data: AppData): AppData {
         team: user.team || seedUser?.team || "Unassigned",
       };
     }),
-    ...seedData.users.filter((user) => !existingUserIds.has(user.id)),
+    ...seedData.users.filter((user) => !existingUserIds.has(user.id) && !archivedIds.has(user.id)),
   ];
   const skills = mergeById(data.skills || [], seedData.skills);
   const targetSkills = mergeById(data.targetSkills || [], seedData.targetSkills);
@@ -113,6 +123,7 @@ function normalizeData(data: AppData): AppData {
       autoSubmittedReason: attempt.autoSubmittedReason || null,
       proctorCaptures: attempt.proctorCaptures || [],
     })),
+    archive: data.archive || [],
   };
 }
 
@@ -122,6 +133,14 @@ export default function App() {
   const [sessionId, setSessionId] = useLocalState<string | null>("nalanda-session-v3", null);
   const [module, setModule] = useState<ModuleKey>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setToastHandler((msg) => {
+      setToastMsg(null);
+      requestAnimationFrame(() => setToastMsg(msg));
+    });
+  }, []);
 
   const currentUser = data.users.find((u) => u.id === sessionId && u.status === "Active") || null;
   const setData = (next: AppData) => setDataState(next);
@@ -149,11 +168,13 @@ export default function App() {
       case "reports": return <Reports data={data} currentUser={currentUser} />;
       case "certificates": return <Certificates data={data} currentUser={currentUser} />;
       case "evaluation": return <Evaluation data={data} currentUser={currentUser} />;
+      case "archive": return <Archive data={data} currentUser={currentUser} setData={setData} />;
       default: return <Dashboard data={data} currentUser={currentUser} />;
     }
   };
 
   return (
+    <>
     <main className="min-h-screen overflow-hidden bg-slate-950 text-slate-100">
       <div className="pointer-events-none fixed inset-0 bg-mesh" />
       <div className="relative z-10 flex min-h-screen">
@@ -234,6 +255,8 @@ export default function App() {
         </section>
       </div>
     </main>
+    <ToastNotification message={toastMsg} onDone={() => setToastMsg(null)} />
+    </>
   );
 }
 

@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Panel, Modal, StatusPill, Input, Select, Avatar, Metric, cn } from "../components";
-import type { AppData, User, Role, Status } from "../types";
+import { Panel, Modal, StatusPill, Input, Select, Avatar, Metric, DeleteConfirmModal, cn } from "../components";
+import type { AppData, User, Role, Status, ArchivedRecord } from "../types";
 import { isAdminRole, now, uid } from "../types";
+import { toast } from "../toast";
 
 type Tab = "employees" | "hierarchy" | "skills" | "bulk" | "access";
 type EmployeeForm = {
@@ -98,6 +99,7 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
   const managers = data.users.filter((user) => user.role === "Manager" || isAdminRole(user.role));
   const [form, setForm] = useState<EmployeeForm>(blankForm(managers[0]?.id || ""));
   const [query, setQuery] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [statusFilter, setStatusFilter] = useState<"All" | Status>("All");
   const [departmentFilter, setDepartmentFilter] = useState("All");
   const [teamFilter, setTeamFilter] = useState("All");
@@ -152,10 +154,12 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
         ...data,
         users: data.users.map((user) => user.id === editing.id ? { ...user, ...baseUser } : user),
       }, "Updated employee profile", editing.id));
+      toast("Employee updated successfully");
     } else {
       if (data.users.some((user) => user.id === form.employeeId)) return;
       const newUser: User = { id: form.employeeId, lastActive: "Never", preferences: { theme: "dark", language: "en", emailNotifications: true, pushNotifications: true, weeklyDigest: true, courseReminders: true, fontSize: "medium", reducedMotion: false, highContrast: false }, ...baseUser };
       setData(addAudit({ ...data, users: [newUser, ...data.users] }, "Created employee", newUser.id));
+      toast("Employee created successfully");
     }
 
     setOpen(false);
@@ -171,6 +175,29 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
 
   const patch = (id: string, patchData: Partial<User>, action = "Updated employee") => {
     setData(addAudit({ ...data, users: data.users.map((user) => user.id === id ? { ...user, ...patchData } : user) }, action, id));
+    if (action.includes("Deactivated")) toast("Employee deactivated successfully");
+    else if (action.includes("Activated")) toast("Employee activated successfully");
+  };
+
+  const handleDeleteUser = (comment: string) => {
+    if (!deleteTarget) return;
+    const archived: ArchivedRecord = {
+      id: uid("ARC"),
+      entityType: "User",
+      entityId: deleteTarget.id,
+      entityData: { ...deleteTarget },
+      deletedBy: currentUser.id,
+      deletedByName: currentUser.name,
+      deletionComment: comment,
+      deletedAt: now(),
+    };
+    setData(addAudit({
+      ...data,
+      users: data.users.filter((user) => user.id !== deleteTarget.id),
+      archive: [archived, ...(data.archive || [])],
+    }, "Permanently deleted user", deleteTarget.id));
+    setDeleteTarget(null);
+    toast("User deleted successfully");
   };
 
   const downloadSample = () => {
@@ -315,7 +342,7 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
                       <td className="px-4 py-4"><StatusPill tone={isAdminRole(user.role) ? "violet" : user.role === "Manager" ? "cyan" : "slate"}>{user.role}</StatusPill></td>
                       <td className="px-4 py-4">{managerName(data.users, user.managerId)}</td>
                       <td className="px-4 py-4"><StatusPill tone={user.status === "Active" ? "green" : "red"}>{user.status}</StatusPill></td>
-                      <td className="px-4 py-4"><div className="flex gap-2"><button onClick={() => editEmployee(user)} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-white/5">Edit</button><button onClick={() => patch(user.id, { status: user.status === "Active" ? "Inactive" : "Active" }, user.status === "Active" ? "Deactivated employee" : "Activated employee")} className="rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5">{user.status === "Active" ? "Deactivate" : "Activate"}</button></div></td>
+                      <td className="px-4 py-4"><div className="flex gap-2"><button onClick={() => editEmployee(user)} className="action-btn rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-cyan-100">Edit</button><button onClick={() => patch(user.id, { status: user.status === "Active" ? "Inactive" : "Active" }, user.status === "Active" ? "Deactivated employee" : "Activated employee")} className="action-btn rounded-full border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200">{user.status === "Active" ? "Deactivate" : "Activate"}</button>{currentUser.role === "Super Admin" && user.id !== currentUser.id && <button onClick={() => setDeleteTarget(user)} className="action-btn rounded-full border border-rose-300/30 bg-rose-300/10 px-3 py-2 text-xs font-semibold text-rose-200">Delete</button>}</div></td>
                     </tr>
                   ))}
                 </tbody>
@@ -449,6 +476,15 @@ export default function Users({ data, currentUser, setData }: { data: AppData; c
               <button className="rounded-full bg-cyan-300 px-5 py-3 font-bold text-slate-950 md:col-span-2">Save employee information</button>
             </form>
           </Modal>
+        )}
+        {deleteTarget && (
+          <DeleteConfirmModal
+            entityType="User"
+            entityName={deleteTarget.name}
+            entityId={deleteTarget.id}
+            onConfirm={handleDeleteUser}
+            onClose={() => setDeleteTarget(null)}
+          />
         )}
       </AnimatePresence>
     </div>

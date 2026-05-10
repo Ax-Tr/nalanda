@@ -226,3 +226,22 @@ LEFT JOIN course_progress cp ON cp.assignment_id = ca.id
 LEFT JOIN assessments a ON a.course_id = c.id
 LEFT JOIN assessment_attempts aa ON aa.assessment_id = a.id
 GROUP BY c.id, c.title;
+
+-- Soft-delete status for assessments
+ALTER TABLE assessments ADD COLUMN IF NOT EXISTS status lifecycle_status NOT NULL DEFAULT 'Active';
+CREATE INDEX IF NOT EXISTS idx_assessments_status ON assessments(status);
+
+-- Super Admin deletion archive with mandatory audit metadata
+CREATE TABLE deleted_archives (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('User', 'Course', 'Assessment')),
+  entity_id TEXT NOT NULL,
+  entity_data JSONB NOT NULL,
+  related_data JSONB NOT NULL DEFAULT '{}',
+  deleted_by TEXT NOT NULL REFERENCES users(id),
+  deletion_comment TEXT NOT NULL CHECK (length(trim(deletion_comment)) >= 10),
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_archives_entity ON deleted_archives(entity_type, deleted_at DESC);
+CREATE INDEX idx_archives_deleted_by ON deleted_archives(deleted_by);
