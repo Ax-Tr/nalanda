@@ -37,14 +37,14 @@ input[type="checkbox"], input[type="radio"], input[type="range"],
 input[type="file"], input[type="color"],
 .action-btn, .cursor-pointer, [onclick],
 th[aria-sort], details > summary {
-  cursor: url('/cursors/cursor-silver.svg') 0 0, pointer !important;
+  cursor: url('/cursors/hand-cursor-silver.svg') 0 0, pointer !important;
 }
 
 /* Also apply silver hand on hover state for interactive elements */
 a:hover, button:hover, [role="button"]:hover, select:hover,
 .action-btn:hover, [tabindex]:not([tabindex="-1"]):hover,
 label:hover, summary:hover {
-  cursor: url('/cursors/cursor-silver.svg') 0 0, pointer !important;
+  cursor: url('/cursors/hand-cursor-silver.svg') 0 0, pointer !important;
 }
 
 /* Text inputs keep a text-select feel but with pen nib base */
